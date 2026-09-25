@@ -4,7 +4,7 @@ import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
-import android.widget.TextView
+import android.opengl.GLSurfaceView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
@@ -12,14 +12,16 @@ class MainActivity : AppCompatActivity() {
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var adapter: ChatAdapter
+    private lateinit var glSurfaceView: GLSurfaceView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Зареждане на C++ статуса в горния екран
-        val engineStatus: TextView = findViewById(R.id.engine_status)
-        engineStatus.text = stringFromJNI()
+        // Инициализация на 3D енджина (OpenGL ES 3.0)
+        glSurfaceView = findViewById(R.id.gl_surface_view)
+        glSurfaceView.setEGLContextClientVersion(3)
+        glSurfaceView.setRenderer(EngineRenderer())
 
         // Инициализация на чата
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
@@ -30,17 +32,14 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        // Начално съобщение
-        addMessage("Система: GMS Engine е готов. Очаквам команди за генериране на 3D свят...", false)
+        addMessage("Система: Хардуерният 3D графичен енджин (OpenGL ES 3.0) е стартиран успешно.", false)
 
         btnSend.setOnClickListener {
             val text = chatInput.text.toString().trim()
             if (text.isNotEmpty()) {
                 addMessage(text, true)
                 chatInput.text.clear()
-                
-                // Временна симулация на отговор (по-късно ще го вържем с AI Cloud)
-                addMessage("Обработвам команда: '$text'. Изпращам към C++ ядрото...", false)
+                addMessage("Обработвам команда: '$text'...", false)
             }
         }
     }
@@ -51,11 +50,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<RecyclerView>(R.id.chat_recycler).scrollToPosition(messages.size - 1)
     }
 
-    external fun stringFromJNI(): String
+    override fun onResume() {
+        super.onResume()
+        glSurfaceView.onResume()
+    }
 
-    companion object {
-        init {
-            System.loadLibrary("engine")
-        }
+    override fun onPause() {
+        super.onPause()
+        glSurfaceView.onPause()
     }
 }
