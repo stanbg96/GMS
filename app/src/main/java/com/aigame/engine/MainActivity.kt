@@ -12,7 +12,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -26,7 +25,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Инициализация на локалната памет за запазване на ключовете
         prefs = getSharedPreferences("GMS_PREFS", Context.MODE_PRIVATE)
 
         glSurfaceView = findViewById(R.id.gl_surface_view)
@@ -42,11 +40,14 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        val savedProvider = prefs.getString("ai_provider", "Не е избран")
-        val savedModel = prefs.getString("ai_model", "")
-        addMessage("Система: GMS Engine е готов. Текущ AI: $savedProvider ($savedModel)", false)
+        val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
+        val savedModel = prefs.getString("ai_model", "") ?: ""
+        if (savedModel.isNotEmpty()) {
+            addMessage("Система: GMS Engine е готов. Активен AI: $savedProvider ($savedModel)", false)
+        } else {
+            addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud', за да настроиш AI модел.", false)
+        }
 
-        // Отваряне на менюто при натискане на бутона
         btnAiCloud.setOnClickListener {
             showAiCloudDialog()
         }
@@ -54,17 +55,27 @@ class MainActivity : AppCompatActivity() {
         btnSend.setOnClickListener {
             val text = chatInput.text.toString().trim()
             if (text.isNotEmpty()) {
-                addMessage(text, true)
-                chatInput.text.clear()
-                
-                val key = prefs.getString("ai_api_key", "")
-                if (key.isNullOrEmpty()) {
-                    addMessage("Система: Моля, въведи API ключ от менюто 'AI Cloud' първо!", false)
+                val provider = prefs.getString("ai_provider", "") ?: ""
+                val key = prefs.getString("ai_api_key", "") ?: ""
+                val model = prefs.getString("ai_model", "") ?: ""
+
+                if (key.isEmpty() || model.isEmpty() || model == "Не е избран") {
+                    addMessage("Система: Моля, настройте доставчик и модел от 'AI Cloud' първо!", false)
                     return@setOnClickListener
                 }
-                
-                addMessage("Обработвам команда...", false)
-                // В следващата стъпка тук ще добавим реалното генериране на отговор
+
+                addMessage(text, true)
+                chatInput.text.clear()
+
+                addMessage("...", false)
+                val loadingIndex = messages.size - 1
+
+                lifecycleScope.launch {
+                    val reply = AiCloudManager.generateResponse(provider, key, model, text)
+                    messages[loadingIndex] = ChatMessage(reply, false)
+                    adapter.notifyItemChanged(loadingIndex)
+                    chatRecycler.scrollToPosition(loadingIndex)
+                }
             }
         }
     }
@@ -83,18 +94,15 @@ class MainActivity : AppCompatActivity() {
         val btnTest: Button = dialog.findViewById(R.id.btn_test)
         val btnSave: Button = dialog.findViewById(R.id.btn_save)
 
-        // Добавяме OpenRouter като първи избор
         val providers = arrayOf("OpenRouter", "Google Gemini", "OpenAI", "Anthropic")
         spinnerProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers)
 
-        // Зареждаме запазените данни
         val savedProvider = prefs.getString("ai_provider", "OpenRouter")
         spinnerProvider.setSelection(providers.indexOf(savedProvider))
         etApiKey.setText(prefs.getString("ai_api_key", ""))
 
         var currentModels = mutableListOf<String>()
 
-        // Бутон "Свали модели"
         btnFetch.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
@@ -104,7 +112,7 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            tvStatus.text = "Сваляне на модели от сървъра..."
+            tvStatus.text = "Сваляне на модели..."
             tvStatus.setTextColor(0xFFFFFF00.toInt())
 
             lifecycleScope.launch {
@@ -118,30 +126,35 @@ class MainActivity : AppCompatActivity() {
                     tvStatus.text = "Успех! Намерени ${models.size} модела."
                     tvStatus.setTextColor(0xFF00FF00.toInt())
                 } else {
-                    tvStatus.text = "Грешка! Провери ключа или интернета."
+                    tvStatus.text = "Грешка! Провери ключа или връзката."
                     tvStatus.setTextColor(0xFFFF0000.toInt())
                 }
             }
         }
 
-        // Бутон "Тест"
         btnTest.setOnClickListener {
-            if (currentModels.isEmpty() && spinnerModels.visibility == View.GONE) {
+            val provider = spinnerProvider.selectedItem.toString()
+            val key = etApiKey.text.toString().trim()
+            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) {
+                spinnerModels.selectedItem.toString()
+            } else ""
+
+            if (key.isEmpty() || model.isEmpty()) {
                 tvStatus.text = "Първо свали и избери модел!"
                 tvStatus.setTextColor(0xFFFF0000.toInt())
                 return@setOnClickListener
             }
-            tvStatus.text = "Тестване на връзката..."
+
+            tvStatus.text = "Изпращане на тестов въпрос..."
             tvStatus.setTextColor(0xFFFFFF00.toInt())
-            
+
             lifecycleScope.launch {
-                delay(800) // Симулация на мрежов пинг
-                tvStatus.text = "Тестът е успешен! Ключът е валиден."
+                val testRes = AiCloudManager.generateResponse(provider, key, model, "Тест. Кажи 'Връзката работи!'.")
+                tvStatus.text = testRes
                 tvStatus.setTextColor(0xFF00FF00.toInt())
             }
         }
 
-        // Бутон "Запази"
         btnSave.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
@@ -151,14 +164,13 @@ class MainActivity : AppCompatActivity() {
                 "Не е избран"
             }
 
-            // Запазване в паметта на телефона
             prefs.edit()
                 .putString("ai_provider", provider)
                 .putString("ai_api_key", key)
                 .putString("ai_model", model)
                 .apply()
 
-            addMessage("Система: AI Cloud е запазен -> $provider | $model", false)
+            addMessage("Система: AI Cloud запазен -> $provider | $model", false)
             dialog.dismiss()
         }
 
