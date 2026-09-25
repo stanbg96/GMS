@@ -6,7 +6,6 @@
     android:layout_height="match_parent"
     android:background="#121212">
 
-    <!-- 3D Engine Viewport (Горна част) -->
     <FrameLayout
         android:id="@+id/engine_viewport"
         android:layout_width="0dp"
@@ -23,7 +22,6 @@
             android:layout_height="match_parent" />
     </FrameLayout>
 
-    <!-- Chat Layout (Долна част) -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/chat_layout"
         android:layout_width="0dp"
@@ -56,12 +54,21 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
 
+            <Button
+                android:id="@+id/btn_ai_cloud"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="☁️ AI Cloud"
+                android:backgroundTint="#2196F3"
+                android:textColor="#FFFFFF"
+                android:layout_marginEnd="8dp"/>
+
             <EditText
                 android:id="@+id/chat_input"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Въведи команда..."
+                android:hint="Команда..."
                 android:textColorHint="#888888"
                 android:textColor="#FFFFFF"
                 android:background="@android:color/transparent"
