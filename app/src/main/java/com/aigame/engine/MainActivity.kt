@@ -43,9 +43,9 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS 3D Engine е активен. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS 3D Engine е готов. AI: $savedProvider ($savedModel)", false)
         } else {
-            addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud', за да настроиш AI модел.", false)
+            addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
 
         btnAiCloud.setOnClickListener {
@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
                 val model = prefs.getString("ai_model", "") ?: ""
 
                 if (key.isEmpty() || model.isEmpty() || model == "Не е избран") {
-                    addMessage("Система: Моля, настройте доставчик и модел от 'AI Cloud' първо!", false)
+                    addMessage("Система: Моля, настройте AI Cloud от синия бутон първо!", false)
                     return@setOnClickListener
                 }
 
@@ -72,8 +72,6 @@ class MainActivity : AppCompatActivity() {
 
                 lifecycleScope.launch {
                     val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                    
-                    // Извличаме и изпълняваме скритите 3D команди
                     val cleanReply = parseAndExecuteCommands(rawReply)
 
                     messages[loadingIndex] = ChatMessage(cleanReply, false)
@@ -85,7 +83,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseAndExecuteCommands(reply: String): String {
-        var text = reply
         val regex = Regex("\\[CMD:([A-Z_]+):([^\\]]+)\\]")
         val matches = regex.findAll(reply)
 
@@ -107,8 +104,10 @@ class MainActivity : AppCompatActivity() {
                         NativeEngine.setCubeVisible(value.lowercase() == "on")
                     }
                     "SPEED" -> {
-                        val speed = value.trim().toFloat()
-                        NativeEngine.setRotationSpeed(speed)
+                        NativeEngine.setRotationSpeed(value.trim().toFloat())
+                    }
+                    "SCALE" -> {
+                        NativeEngine.setCubeScale(value.trim().toFloat())
                     }
                 }
             } catch (e: Exception) {
@@ -116,8 +115,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Премахваме техническите тагове, за да остане чист отговорът за потребителя
-        return text.replace(regex, "").trim()
+        return reply.replace(regex, "").trim()
     }
 
     private fun showAiCloudDialog() {

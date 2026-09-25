@@ -3,20 +3,17 @@
 #include <cmath>
 #include <android/log.h>
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "GMS_3D", __VA_ARGS__)
-
-static float bgR = 0.1f, bgG = 0.12f, bgB = 0.15f;
-static float cubeR = 0.2f, cubeG = 0.8f, cubeB = 0.3f;
+static float bgR = 0.08f, bgG = 0.09f, bgB = 0.12f;
+static float cubeR = 0.1f, cubeG = 0.4f, cubeB = 0.9f; // Красиво синьо
 static bool showCube = true;
-static float rotSpeed = 1.0f;
+static float rotSpeed = 0.2f; // По-плавно въртене по подразбиране
+static float cubeScale = 0.8f;
 static float currentAngle = 0.0f;
 
 static GLuint shaderProgram = 0;
-static GLint mvpLoc = -1;
-static GLint colorLoc = -1;
+static GLint mvpLoc = -1, modelLoc = -1, colorLoc = -1;
 static float aspect = 1.0f;
 
-// 36 върха за 3D куб (12 триъгълника)
 static const float CUBE_VERTICES[] = {
     -0.5f, -0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
     -0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,
@@ -36,40 +33,61 @@ static const char* VERTEX_SHADER =
     "#version 300 es\n"
     "layout(location = 0) in vec3 aPos;\n"
     "uniform mat4 uMVP;\n"
-    "out vec3 vPos;\n"
+    "uniform mat4 uModel;\n"
+    "out vec3 vWorldPos;\n"
     "void main() {\n"
-    "    vPos = aPos;\n"
+    "    vWorldPos = vec3(uModel * vec4(aPos, 1.0));\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
     "}\n";
 
 static const char* FRAGMENT_SHADER =
     "#version 300 es\n"
     "precision mediump float;\n"
-    "in vec3 vPos;\n"
+    "in vec3 vWorldPos;\n"
     "uniform vec3 uColor;\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
-    "    vec3 shade = uColor * (0.6 + 0.4 * abs(vPos));\n"
-    "    FragColor = vec4(shade, 1.0);\n"
+    "    vec3 N = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));\n"
+    "    vec3 L = normalize(vec3(0.5, 1.0, 0.7));\n"
+    "    float diff = max(dot(N, L), 0.25);\n"
+    "    FragColor = vec4(uColor * diff, 1.0);\n"
     "}\n";
 
-static GLuint compileShader(GLenum type, const char* src) {
-    GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, nullptr);
-    glCompileShader(s);
-    return s;
+static void mat4_identity(float* m) {
+    for (int i = 0; i < 16; i++) m[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+}
+
+static void mat4_mul(float* out, const float* a, const float* b) {
+    float temp[16];
+    for (int c = 0; c < 4; c++) {
+        for (int r = 0; r < 4; r++) {
+            temp[c * 4 + r] =
+                a[0 * 4 + r] * b[c * 4 + 0] +
+                a[1 * 4 + r] * b[c * 4 + 1] +
+                a[2 * 4 + r] * b[c * 4 + 2] +
+                a[3 * 4 + r] * b[c * 4 + 3];
+        }
+    }
+    for (int i = 0; i < 16; i++) out[i] = temp[i];
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
-    GLuint vs = compileShader(GL_VERTEX_SHADER, VERTEX_SHADER);
-    GLuint fs = compileShader(GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vs, 1, &VERTEX_SHADER, nullptr);
+    glCompileShader(vs);
+
+    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fs, 1, &FRAGMENT_SHADER, nullptr);
+    glCompileShader(fs);
+
     shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vs);
     glAttachShader(shaderProgram, fs);
     glLinkProgram(shaderProgram);
 
     mvpLoc = glGetUniformLocation(shaderProgram, "uMVP");
+    modelLoc = glGetUniformLocation(shaderProgram, "uModel");
     colorLoc = glGetUniformLocation(shaderProgram, "uColor");
 
     glEnable(GL_DEPTH_TEST);
@@ -90,24 +108,38 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     currentAngle += 0.02f * rotSpeed;
 
-    float radY = currentAngle;
-    float radX = currentAngle * 0.6f;
-    float cosY = cosf(radY), sinY = sinf(radY);
-    float cosX = cosf(radX), sinX = sinf(radX);
+    // 1. Perspective Projection
+    float P[16];
+    mat4_identity(P);
+    float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
+    P[0] = 1.0f / (aspect * tanHalf);
+    P[5] = 1.0f / tanHalf;
+    P[10] = -(100.0f + 0.1f) / (100.0f - 0.1f);
+    P[11] = -1.0f;
+    P[14] = -(2.0f * 100.0f * 0.1f) / (100.0f - 0.1f);
+    P[15] = 0.0f;
 
-    // Перспективна матрица + Ротация и отдалечаване Z = -2.5
-    float fov = 1.0f / tanf(45.0f * 0.5f * 3.14159f / 180.0f);
-    float zDist = 2.5f;
+    // 2. Model Matrix (Мащаб, Ротация, Отдалечаване назад на Z = -3.2)
+    float M[16], R[16], S[16];
+    mat4_identity(M);
+    M[14] = -3.2f; // Камерата е назад
 
-    float mvp[16] = {
-        (fov / aspect) * cosY,  (fov / aspect) * sinY * sinX,  -cosY * sinX / zDist,  0.0f,
-        0.0f,                   fov * cosX,                     -sinX / zDist,         0.0f,
-        (fov / aspect) * -sinY, (fov / aspect) * cosY * sinX,  -cosY * cosX / zDist,  -1.0f / zDist,
-        0.0f,                   0.0f,                           1.0f,                  1.0f
-    };
+    mat4_identity(S);
+    S[0] = cubeScale; S[5] = cubeScale; S[10] = cubeScale;
+
+    mat4_identity(R);
+    float cY = cosf(currentAngle), sY = sinf(currentAngle);
+    float cX = cosf(currentAngle * 0.7f), sX = sinf(currentAngle * 0.7f);
+    R[0] = cY; R[2] = sY; R[5] = cX; R[6] = -sX; R[8] = -sY; R[9] = sX; R[10] = cY * cX;
+
+    float model[16], mvp[16];
+    mat4_mul(model, M, R);
+    mat4_mul(model, model, S);
+    mat4_mul(mvp, P, model);
 
     glUseProgram(shaderProgram);
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model);
     glUniform3f(colorLoc, cubeR, cubeG, cubeB);
 
     glEnableVertexAttribArray(0);
@@ -116,7 +148,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glDisableVertexAttribArray(0);
 }
 
-// JNI функции за контрол от AI
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_setBackgroundColor(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
     bgR = r; bgG = g; bgB = b;
@@ -135,4 +166,9 @@ Java_com_aigame_engine_NativeEngine_setCubeVisible(JNIEnv*, jobject, jboolean vi
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_setRotationSpeed(JNIEnv*, jobject, jfloat speed) {
     rotSpeed = speed;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_setCubeScale(JNIEnv*, jobject, jfloat scale) {
+    cubeScale = scale;
 }
