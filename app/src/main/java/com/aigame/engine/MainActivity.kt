@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS Engine е готов. Активен AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS 3D Engine е активен. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud', за да настроиш AI модел.", false)
         }
@@ -71,13 +71,53 @@ class MainActivity : AppCompatActivity() {
                 val loadingIndex = messages.size - 1
 
                 lifecycleScope.launch {
-                    val reply = AiCloudManager.generateResponse(provider, key, model, text)
-                    messages[loadingIndex] = ChatMessage(reply, false)
+                    val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
+                    
+                    // Извличаме и изпълняваме скритите 3D команди
+                    val cleanReply = parseAndExecuteCommands(rawReply)
+
+                    messages[loadingIndex] = ChatMessage(cleanReply, false)
                     adapter.notifyItemChanged(loadingIndex)
                     chatRecycler.scrollToPosition(loadingIndex)
                 }
             }
         }
+    }
+
+    private fun parseAndExecuteCommands(reply: String): String {
+        var text = reply
+        val regex = Regex("\\[CMD:([A-Z_]+):([^\\]]+)\\]")
+        val matches = regex.findAll(reply)
+
+        for (match in matches) {
+            val cmd = match.groupValues[1]
+            val value = match.groupValues[2]
+
+            try {
+                when (cmd) {
+                    "BG" -> {
+                        val rgb = value.split(",").map { it.trim().toFloat() }
+                        if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
+                    }
+                    "CUBE_COLOR" -> {
+                        val rgb = value.split(",").map { it.trim().toFloat() }
+                        if (rgb.size == 3) NativeEngine.setCubeColor(rgb[0], rgb[1], rgb[2])
+                    }
+                    "CUBE" -> {
+                        NativeEngine.setCubeVisible(value.lowercase() == "on")
+                    }
+                    "SPEED" -> {
+                        val speed = value.trim().toFloat()
+                        NativeEngine.setRotationSpeed(speed)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // Премахваме техническите тагове, за да остане чист отговорът за потребителя
+        return text.replace(regex, "").trim()
     }
 
     private fun showAiCloudDialog() {
@@ -145,11 +185,11 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            tvStatus.text = "Изпращане на тестов въпрос..."
+            tvStatus.text = "Тест..."
             tvStatus.setTextColor(0xFFFFFF00.toInt())
 
             lifecycleScope.launch {
-                val testRes = AiCloudManager.generateResponse(provider, key, model, "Тест. Кажи 'Връзката работи!'.")
+                val testRes = AiCloudManager.generateResponse(provider, key, model, "Тест. Кажи 'Работи!'.")
                 tvStatus.text = testRes
                 tvStatus.setTextColor(0xFF00FF00.toInt())
             }

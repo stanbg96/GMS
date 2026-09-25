@@ -65,12 +65,19 @@ object AiCloudManager {
 
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
-            val sysPrompt = "Ти си AI Game Master за 3D енджина GMS. Отговаряй кратко и ясно на български език."
-            
+            // Инструкции за AI как да управлява 3D енджина чрез команди в края на съобщението
+            val sysPrompt = 
+                "Ти си AI Game Master за 3D енджина GMS. Отговаряй кратко и ентусиазирано на български език.\n" +
+                "Когато потребителят поиска промяна на света, куба или цвета, винаги добавяй в самия край на съобщението съответните команди:\n" +
+                "[CMD:BG:r,g,b] - за цвят на небето/фона (стойности от 0.0 до 1.0)\n" +
+                "[CMD:CUBE_COLOR:r,g,b] - за цвят на 3D обекта (стойности от 0.0 до 1.0)\n" +
+                "[CMD:CUBE:on] или [CMD:CUBE:off] - показване или скриване на куба\n" +
+                "[CMD:SPEED:число] - скорост на въртене (напр. 0.0, 1.0, 3.0, 5.0)\n" +
+                "Пример: 'Готово! Смених цвета на куба на ярко червен.\n[CMD:CUBE_COLOR:1.0,0.0,0.0]'"
+
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {
                     val endpoint = if (provider == "OpenRouter") "https://openrouter.ai/api/v1/chat/completions" else "https://api.openai.com/v1/chat/completions"
-                    
                     val jsonBody = JSONObject().apply {
                         put("model", model)
                         val msgs = JSONArray().apply {
@@ -100,7 +107,6 @@ object AiCloudManager {
                 "Google Gemini" -> {
                     val cleanModel = if (model.startsWith("models/")) model else "models/$model"
                     val endpoint = "https://generativelanguage.googleapis.com/v1beta/$cleanModel:generateContent?key=$apiKey"
-                    
                     val jsonBody = JSONObject().apply {
                         val contents = JSONArray().apply {
                             put(JSONObject().apply {
@@ -155,23 +161,13 @@ object AiCloudManager {
             val json = JSONObject(body)
             return@withContext when (provider) {
                 "OpenRouter", "OpenAI" -> {
-                    json.getJSONArray("choices")
-                        .getJSONObject(0)
-                        .getJSONObject("message")
-                        .getString("content")
+                    json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
                 }
                 "Google Gemini" -> {
-                    json.getJSONArray("candidates")
-                        .getJSONObject(0)
-                        .getJSONObject("content")
-                        .getJSONArray("parts")
-                        .getJSONObject(0)
-                        .getString("text")
+                    json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
                 }
                 "Anthropic" -> {
-                    json.getJSONArray("content")
-                        .getJSONObject(0)
-                        .getString("text")
+                    json.getJSONArray("content").getJSONObject(0).getString("text")
                 }
                 else -> body
             }
