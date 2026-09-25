@@ -3,16 +3,83 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#121212">
 
-    <TextView
-        android:id="@+id/sample_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Зареждане..."
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
+    <!-- 3D Engine Viewport (Горна част) -->
+    <FrameLayout
+        android:id="@+id/engine_viewport"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="#000000"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/chat_layout"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintEnd_toEndOf="parent">
+        
+        <TextView
+            android:id="@+id/engine_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textColor="#00FF00"
+            android:textSize="16sp"
+            android:text="3D Viewport Placeholder" />
+    </FrameLayout>
 
+    <!-- Chat Layout (Долна част) -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/chat_layout"
+        android:layout_width="0dp"
+        android:layout_height="350dp"
+        android:background="#1E1E1E"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/chat_recycler"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:padding="8dp"
+            android:clipToPadding="false"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toTopOf="@+id/input_layout"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <LinearLayout
+            android:id="@+id/input_layout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp"
+            android:background="#252526"
+            android:gravity="center_vertical"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <EditText
+                android:id="@+id/chat_input"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Въведи команда..."
+                android:textColorHint="#888888"
+                android:textColor="#FFFFFF"
+                android:background="@android:color/transparent"
+                android:padding="12dp"
+                android:inputType="textMultiLine"
+                android:maxLines="4"/>
+
+            <Button
+                android:id="@+id/btn_send"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Изпрати"
+                android:backgroundTint="#4CAF50"
+                android:textColor="#FFFFFF"/>
+        </LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>
