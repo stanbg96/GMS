@@ -9,18 +9,19 @@ object NativeEngine {
     external fun onSurfaceChanged(width: Int, height: Int)
     external fun onDrawFrame()
 
-    // Свободна камера и Джойстик
+    // Камера и движение
     external fun moveCamera(forwardInput: Float, strafeInput: Float)
     external fun rotateLook(dx: Float, dy: Float)
+    external fun zoomCamera(delta: Float)
 
-    // Raycast селекция (клик върху модел)
+    // Raycast селекция и преместване
     external fun pickObject(tapX: Float, tapY: Float): Int
+    external fun moveSelectedXZ(deltaRight: Float, deltaForward: Float)
 
-    // Редакторски опции за избрания обект
+    // Операции с обекта
     external fun deleteSelected()
     external fun duplicateSelected()
     external fun scaleSelected(factor: Float)
     external fun rotateSelected(deg: Float)
     external fun moveSelectedY(deltaY: Float)
-    external fun spawnNewObject()
 }

@@ -7,8 +7,8 @@ static float bgR = 0.20f, bgG = 0.22f, bgB = 0.26f;
 static float aspect = 1.0f;
 static int screenW = 1080, screenH = 1920;
 
-// Камерата е отдалечена назад (Z=16) и високо (Y=6.5) за панорамен изглед
-static float camX = 0.0f, camY = 6.5f, camZ = 16.0f;
+// Камерата е отдалечена (Z=15, Y=6.0) за широк панорамен поглед
+static float camX = 0.0f, camY = 6.0f, camZ = 15.0f;
 static float camYaw = 0.0f;
 static float camPitch = -0.38f;
 
@@ -70,7 +70,7 @@ static const char* FRAGMENT_SHADER =
     "    float diff = max(dot(N, L), 0.0) * 0.55 + 0.45;\n"
     "    vec3 col = uColor * diff;\n"
     "    if (uIsSelected == 1) {\n"
-    "        col = mix(col, vec3(1.0, 0.85, 0.2), 0.55);\n"
+    "        col = mix(col, vec3(1.0, 0.85, 0.2), 0.65);\n"
     "    }\n"
     "    FragColor = vec4(col, 1.0);\n"
     "}\n";
@@ -124,10 +124,10 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
 
     for (int i = 0; i < MAX_OBJECTS; i++) sceneObjects[i].active = false;
 
-    // Подредени обекти с добра видимост отдалеч
-    sceneObjects[0] = { true, 1,  0.0f, 0.6f,  0.0f, 1.2f, 0.0f, 0.9f, 0.2f, 0.2f }; // Червена кола
-    sceneObjects[1] = { true, 0, -4.5f, 0.9f, -2.0f, 1.8f, 0.0f, 0.2f, 0.5f, 0.9f }; // Синя къща
-    sceneObjects[2] = { true, 2,  4.5f, 1.2f, -1.0f, 1.2f, 0.0f, 0.2f, 0.8f, 0.3f }; // Зелена кула
+    // Начални 3D обекти
+    sceneObjects[0] = { true, 0,  0.0f, 0.7f,  0.0f, 1.4f, 0.0f, 0.9f, 0.2f, 0.2f }; // Червен
+    sceneObjects[1] = { true, 0, -4.5f, 0.9f, -2.0f, 1.8f, 0.0f, 0.2f, 0.5f, 0.9f }; // Син
+    sceneObjects[2] = { true, 0,  4.5f, 1.2f, -1.0f, 1.2f, 0.0f, 0.2f, 0.8f, 0.3f }; // Зелен
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -239,6 +239,28 @@ Java_com_aigame_engine_NativeEngine_rotateLook(JNIEnv*, jobject, jfloat dx, jflo
     if (camPitch < -1.3f) camPitch = -1.3f;
 }
 
+// ZOOM НА КАМЕРАТА
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_zoomCamera(JNIEnv*, jobject, jfloat delta) {
+    float cP = cosf(camPitch), sP = sinf(camPitch);
+    float cY = cosf(camYaw),   sY = sinf(camYaw);
+    float fX = cP * sY, fY = sP, fZ = -cP * cY;
+    camX += fX * delta;
+    camY += fY * delta;
+    camZ += fZ * delta;
+    if (camY < 1.0f) camY = 1.0f;
+}
+
+// ПРЕМЕСТВАНЕ НА ОБЕКТА ПО ЗЕМЯТА
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_moveSelectedXZ(JNIEnv*, jobject, jfloat deltaRight, jfloat deltaForward) {
+    if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS && sceneObjects[selectedObjectIndex].active) {
+        float cY = cosf(camYaw), sY = sinf(camYaw);
+        sceneObjects[selectedObjectIndex].x += (cY * deltaRight + sY * deltaForward);
+        sceneObjects[selectedObjectIndex].z += (sY * deltaRight - cY * deltaForward);
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_aigame_engine_NativeEngine_pickObject(JNIEnv*, jobject, jfloat tapX, jfloat tapY) {
     if (screenW <= 0 || screenH <= 0) return -1;
@@ -331,17 +353,5 @@ Java_com_aigame_engine_NativeEngine_moveSelectedY(JNIEnv*, jobject, jfloat delta
     if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
         sceneObjects[selectedObjectIndex].y += deltaY;
         if (sceneObjects[selectedObjectIndex].y < 0.2f) sceneObjects[selectedObjectIndex].y = 0.2f;
-    }
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_spawnNewObject(JNIEnv*, jobject) {
-    for (int i = 0; i < MAX_OBJECTS; i++) {
-        if (!sceneObjects[i].active) {
-            float fX = sinf(camYaw), fZ = -cosf(camYaw);
-            sceneObjects[i] = { true, 0, camX + fX * 6.0f, 0.7f, camZ + fZ * 6.0f, 1.4f, 0.0f, 0.95f, 0.65f, 0.15f };
-            selectedObjectIndex = i;
-            break;
-        }
     }
 }

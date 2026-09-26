@@ -5,6 +5,8 @@ import android.app.Dialog
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -37,6 +39,17 @@ class MainActivity : AppCompatActivity() {
     private var forwardInput = 0f
     private var strafeInput = 0f
 
+    private var currentSelectedIdx = -1
+    private var isDraggingObject = false
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val holdRunnable = Runnable {
+        if (currentSelectedIdx >= 0) {
+            isDraggingObject = true
+            tvEditorInfo.text = "🎯 Влачи с пръст, за да местиш обекта"
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         tvEditorInfo = findViewById(R.id.tv_editor_info)
         joystickView = findViewById(R.id.joystick_view)
 
-        // Движение с джойстика в реално време
+        // Джойстик движение
         joystickView.onJoystickMove = { f, s ->
             forwardInput = f
             strafeInput = s
@@ -67,7 +80,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Тъч управление на 3D екрана
+        // Бутони за Zoom горе вдясно
+        findViewById<Button>(R.id.btn_zoom_in).setOnClickListener { NativeEngine.zoomCamera(1.8f) }
+        findViewById<Button>(R.id.btn_zoom_out).setOnClickListener { NativeEngine.zoomCamera(-1.8f) }
+
+        // Тъч логика
         glSurfaceView.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -75,35 +92,60 @@ class MainActivity : AppCompatActivity() {
                     downY = event.y
                     prevX = event.x
                     prevY = event.y
+                    isDraggingObject = false
+
+                    val hit = NativeEngine.pickObject(event.x, event.y)
+                    if (hit >= 0) {
+                        currentSelectedIdx = hit
+                        toolbarSelected.visibility = View.VISIBLE
+                        tvEditorInfo.text = "Избран обект #$hit (Задръж за влачене)"
+                        mainHandler.postDelayed(holdRunnable, 250)
+                    } else {
+                        mainHandler.removeCallbacks(holdRunnable)
+                    }
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.x - prevX) * 0.005f
-                    val dy = (event.y - prevY) * 0.005f
-                    NativeEngine.rotateLook(dx, dy)
+                    val dx = event.x - prevX
+                    val dy = event.y - prevY
+
+                    if (isDraggingObject) {
+                        // Влачене на обекта по земята
+                        NativeEngine.moveSelectedXZ(dx * 0.035f, -dy * 0.035f)
+                    } else {
+                        val travel = abs(event.x - downX) + abs(event.y - downY)
+                        if (travel > 18f) {
+                            mainHandler.removeCallbacks(holdRunnable)
+                        }
+                        // Оглеждане с камерата
+                        NativeEngine.rotateLook(dx * 0.0045f, dy * 0.005f)
+                    }
                     prevX = event.x
                     prevY = event.y
                 }
-                MotionEvent.ACTION_UP -> {
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    mainHandler.removeCallbacks(holdRunnable)
                     val travel = abs(event.x - downX) + abs(event.y - downY)
-                    if (travel < 20f) {
-                        val hitIndex = NativeEngine.pickObject(event.x, event.y)
-                        if (hitIndex >= 0) {
-                            toolbarSelected.visibility = View.VISIBLE
-                            tvEditorInfo.text = "Избран обект #$hitIndex"
-                        } else {
-                            toolbarSelected.visibility = View.GONE
-                            tvEditorInfo.text = "Докосни обект за избор"
-                        }
+
+                    if (!isDraggingObject && travel < 18f && currentSelectedIdx < 0) {
+                        NativeEngine.pickObject(-1000f, -1000f)
+                        toolbarSelected.visibility = View.GONE
+                        tvEditorInfo.text = "Докосни обект за избор | Задръж за влачене"
+                    }
+
+                    if (isDraggingObject) {
+                        isDraggingObject = false
+                        tvEditorInfo.text = "Обект #$currentSelectedIdx е преместен"
                     }
                 }
             }
             true
         }
 
-        // Действия върху селектирания обект
+        // Действия с избрания обект
         findViewById<Button>(R.id.btn_delete).setOnClickListener {
             NativeEngine.deleteSelected()
             toolbarSelected.visibility = View.GONE
+            currentSelectedIdx = -1
             tvEditorInfo.text = "Обектът е изтрит"
         }
         findViewById<Button>(R.id.btn_duplicate).setOnClickListener {
@@ -118,15 +160,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_close_selection).setOnClickListener {
             NativeEngine.pickObject(-1000f, -1000f)
             toolbarSelected.visibility = View.GONE
-            tvEditorInfo.text = "Докосни обект за избор"
-        }
-        findViewById<Button>(R.id.btn_spawn_new).setOnClickListener {
-            NativeEngine.spawnNewObject()
-            toolbarSelected.visibility = View.VISIBLE
-            tvEditorInfo.text = "Добавен нов обект"
+            currentSelectedIdx = -1
+            tvEditorInfo.text = "Докосни обект за избор | Задръж за влачене"
         }
 
-        // ЧАТ ИНТЕРФЕЙС (30%)
+        // ЧАТ СИСТЕМА (30%)
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -136,7 +174,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("GMS Editor активен: 70% 3D / 30% Чат.", false)
+        addMessage("3D Editor активен: Джойстик долу вляво, Zoom (+/-) горе вдясно.", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
