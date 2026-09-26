@@ -1,236 +1,140 @@
 package com.aigame.engine
 
 import android.annotation.SuppressLint
-import android.app.Dialog
-import android.content.Context
-import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.MotionEvent
-import android.view.ViewGroup
-import android.widget.*
+import android.view.View
+import android.widget.Button
+import android.widget.HorizontalScrollView
+import android.widget.TextView
 import android.opengl.GLSurfaceView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
-    private val messages = mutableListOf<ChatMessage>()
-    private lateinit var adapter: ChatAdapter
     private lateinit var glSurfaceView: GLSurfaceView
-    private lateinit var prefs: SharedPreferences
+    private lateinit var toolbarSelected: HorizontalScrollView
+    private lateinit var tvEditorInfo: TextView
+    private lateinit var joystickView: JoystickView
 
-    private var prevTouchX = 0f
-    private var prevTouchY = 0f
+    private var downX = 0f
+    private var downY = 0f
+    private var prevX = 0f
+    private var prevY = 0f
+
+    private var forwardInput = 0f
+    private var strafeInput = 0f
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        prefs = getSharedPreferences("GMS_PREFS", Context.MODE_PRIVATE)
-
         glSurfaceView = findViewById(R.id.gl_surface_view)
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
+        toolbarSelected = findViewById(R.id.toolbar_selected)
+        tvEditorInfo = findViewById(R.id.tv_editor_info)
+        joystickView = findViewById(R.id.joystick_view)
+
+        // Джойстик слушател за движение
+        joystickView.onJoystickMove = { f, s ->
+            forwardInput = f
+            strafeInput = s
+        }
+
+        // Непрекъснат цикъл за плавно летене и движение (60 FPS)
+        lifecycleScope.launch {
+            while (true) {
+                if (forwardInput != 0f || strafeInput != 0f) {
+                    NativeEngine.moveCamera(forwardInput, strafeInput)
+                }
+                delay(16)
+            }
+        }
+
+        // Тъч управление: Клик = Избор на обект | Плъзгане = Оглеждане
         glSurfaceView.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    prevTouchX = event.x
-                    prevTouchY = event.y
+                    downX = event.x
+                    downY = event.y
+                    prevX = event.x
+                    prevY = event.y
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.x - prevTouchX) * 0.005f
-                    val dy = (event.y - prevTouchY) * 0.005f
-                    NativeEngine.rotateCamera(dx, dy)
-                    prevTouchX = event.x
-                    prevTouchY = event.y
+                    val dx = (event.x - prevX) * 0.005f
+                    val dy = (event.y - prevY) * 0.005f
+                    NativeEngine.rotateLook(dx, dy)
+                    prevX = event.x
+                    prevY = event.y
+                }
+                MotionEvent.ACTION_UP -> {
+                    // Ако докосването е било кратко чукване на едно място -> Селекция с Raycast
+                    val travel = abs(event.x - downX) + abs(event.y - downY)
+                    if (travel < 20f) {
+                        val hitIndex = NativeEngine.pickObject(event.x, event.y)
+                        if (hitIndex >= 0) {
+                            toolbarSelected.visibility = View.VISIBLE
+                            tvEditorInfo.text = "Избран обект #$hitIndex"
+                        } else {
+                            toolbarSelected.visibility = View.GONE
+                            tvEditorInfo.text = "Докосни обект за избор"
+                        }
+                    }
                 }
             }
             true
         }
 
-        findViewById<Button>(R.id.btn_zoom_in).setOnClickListener { NativeEngine.zoomCamera(-2.0f) }
-        findViewById<Button>(R.id.btn_zoom_out).setOnClickListener { NativeEngine.zoomCamera(2.0f) }
-
-        val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
-        val chatInput: EditText = findViewById(R.id.chat_input)
-        val btnSend: Button = findViewById(R.id.btn_send)
-        val btnAiCloud: Button = findViewById(R.id.btn_ai_cloud)
-
-        adapter = ChatAdapter(messages)
-        chatRecycler.layoutManager = LinearLayoutManager(this)
-        chatRecycler.adapter = adapter
-
-        val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
-        val savedModel = prefs.getString("ai_model", "") ?: ""
-        if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS 3D Asset Studio е готов. AI: $savedProvider ($savedModel)", false)
-        } else {
-            addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
+        // Бутони за управление на избрания 3D обект
+        findViewById<Button>(R.id.btn_delete).setOnClickListener {
+            NativeEngine.deleteSelected()
+            toolbarSelected.visibility = View.GONE
+            tvEditorInfo.text = "Обектът е изтрит"
         }
 
-        btnAiCloud.setOnClickListener { showAiCloudDialog() }
-
-        btnSend.setOnClickListener {
-            val text = chatInput.text.toString().trim()
-            if (text.isNotEmpty()) {
-                val provider = prefs.getString("ai_provider", "") ?: ""
-                val key = prefs.getString("ai_api_key", "") ?: ""
-                val model = prefs.getString("ai_model", "") ?: ""
-
-                if (key.isEmpty() || model.isEmpty() || model == "Не е избран") {
-                    addMessage("Система: Моля, настройте AI Cloud първо!", false)
-                    return@setOnClickListener
-                }
-
-                addMessage(text, true)
-                chatInput.text.clear()
-
-                // Проверка дали потребителят иска кола
-                if (text.lowercase().contains("кола") || text.lowercase().contains("автомобил") || text.lowercase().contains("car")) {
-                    loadCarAsset()
-                    addMessage("Зареждам истински полигонален 3D автомобил...", false)
-                    return@setOnClickListener
-                }
-
-                addMessage("...", false)
-                val loadingIndex = messages.size - 1
-
-                lifecycleScope.launch {
-                    val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                    messages[loadingIndex] = ChatMessage(rawReply, false)
-                    adapter.notifyItemChanged(loadingIndex)
-                    chatRecycler.scrollToPosition(loadingIndex)
-                }
-            }
-        }
-    }
-
-    private fun loadCarAsset() {
-        lifecycleScope.launch {
-            val objContent = withContext(Dispatchers.IO) {
-                try {
-                    assets.open("models/car.obj").bufferedReader().use { it.readText() }
-                } catch (e: Exception) {
-                    ""
-                }
-            }
-
-            if (objContent.isNotEmpty()) {
-                NativeEngine.loadObjString(objContent, 0.95f, 0.15f, 0.12f)
-            } else {
-                addMessage("Грешка: Не намерих файла car.obj в папката с ресурси!", false)
-            }
-        }
-    }
-
-    private fun showAiCloudDialog() {
-        val dialog = Dialog(this)
-        dialog.setContentView(R.layout.dialog_ai_settings)
-        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-
-        val spinnerProvider: Spinner = dialog.findViewById(R.id.spinner_provider)
-        val etApiKey: EditText = dialog.findViewById(R.id.et_api_key)
-        val btnFetch: Button = dialog.findViewById(R.id.btn_fetch_models)
-        val tvModelLabel: TextView = dialog.findViewById(R.id.tv_model_label)
-        val spinnerModels: Spinner = dialog.findViewById(R.id.spinner_models)
-        val tvStatus: TextView = dialog.findViewById(R.id.tv_status)
-        val btnTest: Button = dialog.findViewById(R.id.btn_test)
-        val btnSave: Button = dialog.findViewById(R.id.btn_save)
-
-        val providers = arrayOf("OpenRouter", "Google Gemini", "OpenAI", "Anthropic")
-        spinnerProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers)
-
-        val savedProvider = prefs.getString("ai_provider", "OpenRouter")
-        spinnerProvider.setSelection(providers.indexOf(savedProvider))
-        etApiKey.setText(prefs.getString("ai_api_key", ""))
-
-        var currentModels = mutableListOf<String>()
-
-        btnFetch.setOnClickListener {
-            val provider = spinnerProvider.selectedItem.toString()
-            val key = etApiKey.text.toString().trim()
-            if (key.isEmpty()) {
-                tvStatus.text = "Моля, въведи API ключ!"
-                tvStatus.setTextColor(0xFFFF0000.toInt())
-                return@setOnClickListener
-            }
-
-            tvStatus.text = "Сваляне на модели..."
-            tvStatus.setTextColor(0xFFFFFF00.toInt())
-
-            lifecycleScope.launch {
-                val models = AiCloudManager.fetchModels(provider, key)
-                if (models.isNotEmpty()) {
-                    currentModels.clear()
-                    currentModels.addAll(models)
-                    spinnerModels.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, currentModels)
-                    tvModelLabel.visibility = android.view.View.VISIBLE
-                    spinnerModels.visibility = android.view.View.VISIBLE
-                    tvStatus.text = "Успех! Намерени ${models.size} модела."
-                    tvStatus.setTextColor(0xFF00FF00.toInt())
-                } else {
-                    tvStatus.text = "Грешка! Провери ключа или интернета."
-                    tvStatus.setTextColor(0xFFFF0000.toInt())
-                }
-            }
+        findViewById<Button>(R.id.btn_duplicate).setOnClickListener {
+            NativeEngine.duplicateSelected()
+            tvEditorInfo.text = "Обектът е дублиран"
         }
 
-        btnTest.setOnClickListener {
-            val provider = spinnerProvider.selectedItem.toString()
-            val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) {
-                spinnerModels.selectedItem.toString()
-            } else ""
-
-            if (key.isEmpty() || model.isEmpty()) {
-                tvStatus.text = "Първо свали и избери модел!"
-                tvStatus.setTextColor(0xFFFF0000.toInt())
-                return@setOnClickListener
-            }
-
-            tvStatus.text = "Тест..."
-            tvStatus.setTextColor(0xFFFFFF00.toInt())
-
-            lifecycleScope.launch {
-                val testRes = AiCloudManager.generateResponse(provider, key, model, "Тест. Кажи 'Работи!'.")
-                tvStatus.text = testRes
-                tvStatus.setTextColor(0xFF00FF00.toInt())
-            }
+        findViewById<Button>(R.id.btn_scale_up).setOnClickListener {
+            NativeEngine.scaleSelected(1.25f)
         }
 
-        btnSave.setOnClickListener {
-            val provider = spinnerProvider.selectedItem.toString()
-            val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) {
-                spinnerModels.selectedItem.toString()
-            } else {
-                "Не е избран"
-            }
-
-            prefs.edit()
-                .putString("ai_provider", provider)
-                .putString("ai_api_key", key)
-                .putString("ai_model", model)
-                .apply()
-
-            addMessage("Система: AI Cloud запазен -> $provider | $model", false)
-            dialog.dismiss()
+        findViewById<Button>(R.id.btn_scale_down).setOnClickListener {
+            NativeEngine.scaleSelected(0.80f)
         }
 
-        dialog.show()
-    }
+        findViewById<Button>(R.id.btn_rotate).setOnClickListener {
+            NativeEngine.rotateSelected(30f)
+        }
 
-    private fun addMessage(text: String, isUser: Boolean) {
-        messages.add(ChatMessage(text, isUser))
-        adapter.notifyItemInserted(messages.size - 1)
-        findViewById<RecyclerView>(R.id.chat_recycler).scrollToPosition(messages.size - 1)
+        findViewById<Button>(R.id.btn_up).setOnClickListener {
+            NativeEngine.moveSelectedY(0.4f)
+        }
+
+        findViewById<Button>(R.id.btn_down).setOnClickListener {
+            NativeEngine.moveSelectedY(-0.4f)
+        }
+
+        findViewById<Button>(R.id.btn_close_selection).setOnClickListener {
+            NativeEngine.pickObject(-1000f, -1000f) // Отмяна на селекцията
+            toolbarSelected.visibility = View.GONE
+            tvEditorInfo.text = "Докосни обект за избор"
+        }
+
+        findViewById<Button>(R.id.btn_spawn_new).setOnClickListener {
+            NativeEngine.spawnNewObject()
+            toolbarSelected.visibility = View.VISIBLE
+            tvEditorInfo.text = "Добавен нов обект пред камерата"
+        }
     }
 
     override fun onResume() { super.onResume(); glSurfaceView.onResume() }

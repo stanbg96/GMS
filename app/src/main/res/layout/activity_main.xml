@@ -1,128 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout 
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121212">
+    android:background="#202226">
 
-    <FrameLayout
-        android:id="@+id/engine_viewport"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:background="#000000"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toTopOf="@+id/chat_layout"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-        
-        <android.opengl.GLSurfaceView
-            android:id="@+id/gl_surface_view"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+    <!-- 3D Viewport (Пълен екран) -->
+    <android.opengl.GLSurfaceView
+        android:id="@+id/gl_surface_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 
-        <!-- Бутон за Физика (Горе вляво) -->
+    <!-- Горен бар: Статус и бутон за нов обект -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:gravity="center_vertical">
+
         <Button
-            android:id="@+id/btn_toggle_physics"
+            android:id="@+id/btn_spawn_new"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="top|start"
-            android:layout_margin="12dp"
-            android:text="▶️ Физика: СТОП"
-            android:textSize="12sp"
+            android:text="➕ Нов 3D Обект"
+            android:textSize="13sp"
             android:textColor="#FFFFFF"
-            android:backgroundTint="#88000000"/>
+            android:backgroundTint="#2196F3"/>
 
-        <!-- Бутони за Zoom (Горе вдясно) -->
+        <TextView
+            android:id="@+id/tv_editor_info"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:text="Докосни обект за избор"
+            android:textColor="#00FFCC"
+            android:textSize="13sp"/>
+    </LinearLayout>
+
+    <!-- Виртуален Джойстик за движение (Долу вляво) -->
+    <com.aigame.engine.JoystickView
+        android:id="@+id/joystick_view"
+        android:layout_width="140dp"
+        android:layout_height="140dp"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="16dp" />
+
+    <!-- Плаващо меню за действия с избрания модел (Долу) -->
+    <HorizontalScrollView
+        android:id="@+id/toolbar_selected"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:layout_marginStart="160dp"
+        android:scrollbars="none"
+        android:visibility="gone">
+
         <LinearLayout
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:layout_gravity="top|end"
-            android:layout_margin="12dp">
-
-            <Button
-                android:id="@+id/btn_zoom_in"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:text="+"
-                android:textSize="20sp"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#88000000"/>
-
-            <Button
-                android:id="@+id/btn_zoom_out"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginTop="8dp"
-                android:text="-"
-                android:textSize="20sp"
-                android:textColor="#FFFFFF"
-                android:backgroundTint="#88000000"/>
-        </LinearLayout>
-    </FrameLayout>
-
-    <androidx.constraintlayout.widget.ConstraintLayout
-        android:id="@+id/chat_layout"
-        android:layout_width="0dp"
-        android:layout_height="350dp"
-        android:background="#1E1E1E"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/chat_recycler"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:padding="8dp"
-            android:clipToPadding="false"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintBottom_toTopOf="@+id/input_layout"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent" />
-
-        <LinearLayout
-            android:id="@+id/input_layout"
-            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:padding="8dp"
-            android:background="#252526"
-            android:gravity="center_vertical"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintEnd_toEndOf="parent">
+            android:background="#DD1E1E22">
 
             <Button
-                android:id="@+id/btn_ai_cloud"
+                android:id="@+id/btn_delete"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="☁️ AI Cloud"
-                android:backgroundTint="#2196F3"
+                android:layout_height="42dp"
+                android:text="🗑 Изтрий"
                 android:textColor="#FFFFFF"
-                android:layout_marginEnd="8dp"/>
-
-            <EditText
-                android:id="@+id/chat_input"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:hint="Команда..."
-                android:textColorHint="#888888"
-                android:textColor="#FFFFFF"
-                android:background="@android:color/transparent"
-                android:padding="12dp"
-                android:inputType="textMultiLine"
-                android:maxLines="4"/>
+                android:backgroundTint="#E53935"
+                android:layout_marginEnd="6dp"/>
 
             <Button
-                android:id="@+id/btn_send"
+                android:id="@+id/btn_duplicate"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Изпрати"
-                android:backgroundTint="#4CAF50"
-                android:textColor="#FFFFFF"/>
+                android:layout_height="42dp"
+                android:text="📋 Дубликат"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#3949AB"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btn_scale_up"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="➕ Увеличи"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#43A047"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btn_scale_down"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="➖ Намали"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#FB8C00"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btn_rotate"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="🔄 Завърти"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#8E24AA"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btn_up"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="⬆ Нагоре"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#546E7A"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btn_down"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="⬇ Надолу"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#546E7A"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btn_close_selection"
+                android:layout_width="wrap_content"
+                android:layout_height="42dp"
+                android:text="✖"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#424242"/>
         </LinearLayout>
-    </androidx.constraintlayout.widget.ConstraintLayout>
-</androidx.constraintlayout.widget.ConstraintLayout>
+    </HorizontalScrollView>
+</FrameLayout>

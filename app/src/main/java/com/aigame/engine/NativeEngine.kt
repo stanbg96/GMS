@@ -9,11 +9,18 @@ object NativeEngine {
     external fun onSurfaceChanged(width: Int, height: Int)
     external fun onDrawFrame()
 
-    external fun setBackgroundColor(r: Float, g: Float, b: Float)
-    external fun rotateCamera(dx: Float, dy: Float)
-    external fun zoomCamera(zoom: Float)
+    // Свободна камера и Джойстик
+    external fun moveCamera(forwardInput: Float, strafeInput: Float)
+    external fun rotateLook(dx: Float, dy: Float)
 
-    // Зареждане на истински полигонални OBJ модели
-    external fun loadObjString(objData: String, r: Float, g: Float, b: Float)
-    external fun clearMesh()
+    // Raycast селекция (клик върху модел)
+    external fun pickObject(tapX: Float, tapY: Float): Int
+
+    // Редакторски опции за избрания обект
+    external fun deleteSelected()
+    external fun duplicateSelected()
+    external fun scaleSelected(factor: Float)
+    external fun rotateSelected(deg: Float)
+    external fun moveSelectedY(deltaY: Float)
+    external fun spawnNewObject()
 }

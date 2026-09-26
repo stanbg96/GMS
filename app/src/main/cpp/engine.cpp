@@ -2,74 +2,79 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 #include <vector>
-#include <string>
-#include <sstream>
 
-static float bgR = 0.55f, bgG = 0.68f, bgB = 0.82f;
+static float bgR = 0.20f, bgG = 0.22f, bgB = 0.26f; // Тъмно модерен студиен цвят (Godot style)
 static float aspect = 1.0f;
+static int screenW = 1080, screenH = 1920;
 
-static float camYaw = 0.85f;
-static float camPitch = 0.45f;
-static float camDist = 12.0f;
-static float targetY = 1.2f;
+// Свободна FPS / Editor Камера
+static float camX = 0.0f, camY = 2.5f, camZ = 8.0f;
+static float camYaw = 0.0f;
+static float camPitch = -0.25f;
 
-struct Vertex {
+// Обекти в сцената
+struct EditorObject {
+    bool active;
+    int type; // 0: Къща/Блок, 1: Кола/Болид, 2: Кула/Колона
     float x, y, z;
-    float nx, ny, nz;
+    float scale;
+    float rotY; // Завъртане в градуси
     float r, g, b;
 };
 
-static std::vector<Vertex> meshVertices;
+#define MAX_OBJECTS 64
+static EditorObject sceneObjects[MAX_OBJECTS];
+static int selectedObjectIndex = -1; // -1 = нищо не е избрано
 
 static GLuint shaderProgram = 0;
-static GLint mvpLoc = -1, eyePosLoc = -1;
+static GLint mvpLoc = -1, colorLoc = -1, isSelectedLoc = -1;
 
-#define GRID_LINES 34
+#define GRID_LINES 42
 static float gridVertices[GRID_LINES * 2 * 3];
 
-static const float FLOOR_VERTICES[] = {
-    -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,
-    -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,  -20.0f, 0.0f,  20.0f,  0,1,0
-};
-
-static const float AXIS_VERTICES[] = {
-    -15.0f, 0.01f, 0.0f,   15.0f, 0.01f, 0.0f,
-     0.0f,  0.01f,-15.0f,   0.0f,  0.01f, 15.0f
+static const float CUBE_DATA[] = {
+    -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,
+    -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,  -0.5f, 0.5f, 0.5f,  0,0,1,
+    -0.5f,-0.5f,-0.5f,  0,0,-1, -0.5f, 0.5f,-0.5f,  0,0,-1,  0.5f, 0.5f,-0.5f,  0,0,-1,
+    -0.5f,-0.5f,-0.5f,  0,0,-1,  0.5f, 0.5f,-0.5f,  0,0,-1,  0.5f,-0.5f,-0.5f,  0,0,-1,
+    -0.5f, 0.5f,-0.5f,  0,1,0,  -0.5f, 0.5f, 0.5f,  0,1,0,   0.5f, 0.5f, 0.5f,  0,1,0,
+    -0.5f, 0.5f,-0.5f,  0,1,0,   0.5f, 0.5f, 0.5f,  0,1,0,   0.5f, 0.5f,-0.5f,  0,1,0,
+    -0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f, 0.5f,  0,-1,0,
+    -0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f, 0.5f,  0,-1,0, -0.5f,-0.5f, 0.5f,  0,-1,0,
+     0.5f,-0.5f,-0.5f,  1,0,0,   0.5f, 0.5f,-0.5f,  1,0,0,   0.5f, 0.5f, 0.5f,  1,0,0,
+     0.5f,-0.5f,-0.5f,  1,0,0,   0.5f, 0.5f, 0.5f,  1,0,0,   0.5f,-0.5f, 0.5f,  1,0,0,
+    -0.5f,-0.5f,-0.5f, -1,0,0,  -0.5f,-0.5f, 0.5f, -1,0,0,  -0.5f, 0.5f, 0.5f, -1,0,0,
+    -0.5f,-0.5f,-0.5f, -1,0,0,  -0.5f, 0.5f, 0.5f, -1,0,0,  -0.5f, 0.5f,-0.5f, -1,0,0
 };
 
 static const char* VERTEX_SHADER =
     "#version 300 es\n"
     "layout(location = 0) in vec3 aPos;\n"
     "layout(location = 1) in vec3 aNormal;\n"
-    "layout(location = 2) in vec3 aColor;\n"
     "uniform mat4 uMVP;\n"
-    "out vec3 vWorldPos;\n"
     "out vec3 vNormal;\n"
-    "out vec3 vColor;\n"
     "void main() {\n"
-    "    vWorldPos = aPos;\n"
     "    vNormal = aNormal;\n"
-    "    vColor = aColor;\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
     "}\n";
 
 static const char* FRAGMENT_SHADER =
     "#version 300 es\n"
     "precision mediump float;\n"
-    "in vec3 vWorldPos;\n"
     "in vec3 vNormal;\n"
-    "in vec3 vColor;\n"
-    "uniform vec3 uEyePos;\n"
+    "uniform vec3 uColor;\n"
+    "uniform int uIsSelected;\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
     "    vec3 N = normalize(vNormal);\n"
     "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
-    "    vec3 V = normalize(uEyePos - vWorldPos);\n"
-    "    vec3 H = normalize(L + V);\n"
-    "    float diff = max(dot(N, L), 0.0) * 0.65 + 0.35;\n"
-    "    float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.45;\n"
-    "    vec3 finalCol = vColor * diff + vec3(spec);\n"
-    "    FragColor = vec4(finalCol, 1.0);\n"
+    "    float diff = max(dot(N, L), 0.0) * 0.55 + 0.45;\n"
+    "    vec3 col = uColor * diff;\n"
+    "    // Маркиране на избрания обект в златист контур/цвят\n"
+    "    if (uIsSelected == 1) {\n"
+    "        col = mix(col, vec3(1.0, 0.85, 0.2), 0.55);\n"
+    "    }\n"
+    "    FragColor = vec4(col, 1.0);\n"
     "}\n";
 
 static void mat4_identity(float* m) {
@@ -90,131 +95,6 @@ static void mat4_mul(float* out, const float* a, const float* b) {
     for (int i = 0; i < 16; i++) out[i] = temp[i];
 }
 
-static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float ty, float tz, float ux, float uy, float uz) {
-    float fx = tx - ex, fy = ty - ey, fz = tz - ez;
-    float rlf = 1.0f / sqrtf(fx*fx + fy*fy + fz*fz);
-    fx *= rlf; fy *= rlf; fz *= rlf;
-
-    float rx = fy * uz - fz * uy;
-    float ry = fz * ux - fx * uz;
-    float rz = fx * uy - fy * ux;
-    float rlr = 1.0f / sqrtf(rx*rx + ry*ry + rz*rz);
-    rx *= rlr; ry *= rlr; rz *= rlr;
-
-    float ux2 = ry * fz - rz * fy;
-    float uy2 = rz * fx - rx * fz;
-    float uz2 = rx * fy - ry * fx;
-
-    m[0] = rx;  m[1] = ux2; m[2] = -fx; m[3] = 0.0f;
-    m[4] = ry;  m[5] = uy2; m[6] = -fy; m[7] = 0.0f;
-    m[8] = rz;  m[9] = uz2; m[10]= -fz; m[11]= 0.0f;
-    m[12]= -(rx*ex + ry*ey + rz*ez);
-    m[13]= -(ux2*ex + uy2*ey + uz2*ez);
-    m[14]= (fx*ex + fy*ey + fz*ez);
-    m[15]= 1.0f;
-}
-
-void parseObjString(const std::string& objData, float r, float g, float b) {
-    std::vector<float> tempPos;
-    std::vector<float> tempNorm;
-    meshVertices.clear();
-
-    std::stringstream ss(objData);
-    std::string line;
-
-    while (std::getline(ss, line)) {
-        if (line.size() < 2) continue;
-        if (line[0] == 'v' && line[1] == ' ') {
-            float x, y, z;
-            if (sscanf(line.c_str() + 2, "%f %f %f", &x, &y, &z) == 3) {
-                tempPos.push_back(x); tempPos.push_back(y); tempPos.push_back(z);
-            }
-        } else if (line[0] == 'v' && line[1] == 'n' && line[2] == ' ') {
-            float nx, ny, nz;
-            if (sscanf(line.c_str() + 3, "%f %f %f", &nx, &ny, &nz) == 3) {
-                tempNorm.push_back(nx); tempNorm.push_back(ny); tempNorm.push_back(nz);
-            }
-        } else if (line[0] == 'f' && line[1] == ' ') {
-            std::stringstream lineStream(line.substr(2));
-            std::string faceToken;
-            std::vector<int> faceV;
-            std::vector<int> faceN;
-
-            while (lineStream >> faceToken) {
-                int vi = 0, ti = 0, ni = 0;
-                if (sscanf(faceToken.c_str(), "%d/%d/%d", &vi, &ti, &ni) == 3) {
-                    faceV.push_back(vi); faceN.push_back(ni);
-                } else if (sscanf(faceToken.c_str(), "%d//%d", &vi, &ni) == 2) {
-                    faceV.push_back(vi); faceN.push_back(ni);
-                } else if (sscanf(faceToken.c_str(), "%d/%d", &vi, &ti) == 2) {
-                    faceV.push_back(vi); faceN.push_back(0);
-                } else if (sscanf(faceToken.c_str(), "%d", &vi) == 1) {
-                    faceV.push_back(vi); faceN.push_back(0);
-                }
-            }
-
-            if (faceV.size() >= 3) {
-                for (size_t i = 1; i + 1 < faceV.size(); i++) {
-                    int idx[3] = { 0, (int)i, (int)i + 1 };
-                    for (int k = 0; k < 3; k++) {
-                        int vIdx = (faceV[idx[k]] - 1) * 3;
-                        if (vIdx >= 0 && vIdx + 2 < (int)tempPos.size()) {
-                            float nx = 0.0f, ny = 1.0f, nz = 0.0f;
-                            int nIdx = (faceN[idx[k]] - 1) * 3;
-                            if (faceN[idx[k]] > 0 && nIdx >= 0 && nIdx + 2 < (int)tempNorm.size()) {
-                                nx = tempNorm[nIdx]; ny = tempNorm[nIdx+1]; nz = tempNorm[nIdx+2];
-                            }
-                            meshVertices.push_back({ tempPos[vIdx], tempPos[vIdx+1], tempPos[vIdx+2], nx, ny, nz, r, g, b });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Автоматично центриране и поставяне точно на пода
-    if (!meshVertices.empty()) {
-        float minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, minZ = 1e9, maxZ = -1e9;
-        for (const auto& v : meshVertices) {
-            if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
-            if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
-            if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
-        }
-
-        float cx = (minX + maxX) * 0.5f;
-        float cy = minY; // Основата на гумите стъпва на пода
-        float cz = (minZ + maxZ) * 0.5f;
-        float maxDim = fmaxf(fmaxf(maxX - minX, maxY - minY), maxZ - minZ);
-        float scale = (maxDim > 0.001f) ? (5.5f / maxDim) : 1.0f;
-
-        for (auto& v : meshVertices) {
-            v.x = (v.x - cx) * scale;
-            v.y = (v.y - cy) * scale;
-            v.z = (v.z - cz) * scale;
-        }
-
-        // Автоматично изчисляване на гладки нормали при липса
-        for (size_t i = 0; i + 2 < meshVertices.size(); i += 3) {
-            if (meshVertices[i].nx == 0 && meshVertices[i].ny == 1 && meshVertices[i].nz == 0) {
-                float u1 = meshVertices[i+1].x - meshVertices[i].x;
-                float u2 = meshVertices[i+1].y - meshVertices[i].y;
-                float u3 = meshVertices[i+1].z - meshVertices[i].z;
-                float v1 = meshVertices[i+2].x - meshVertices[i].x;
-                float v2 = meshVertices[i+2].y - meshVertices[i].y;
-                float v3 = meshVertices[i+2].z - meshVertices[i].z;
-                float fnx = u2*v3 - u3*v2;
-                float fny = u3*v1 - u1*v3;
-                float fnz = u1*v2 - u2*v1;
-                float l = sqrtf(fnx*fnx + fny*fny + fnz*fnz);
-                if (l > 0.0001f) { fnx /= l; fny /= l; fnz /= l; }
-                meshVertices[i].nx = meshVertices[i+1].nx = meshVertices[i+2].nx = fnx;
-                meshVertices[i].ny = meshVertices[i+1].ny = meshVertices[i+2].ny = fny;
-                meshVertices[i].nz = meshVertices[i+1].nz = meshVertices[i+2].nz = fnz;
-            }
-        }
-    }
-}
-
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -231,22 +111,35 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     glLinkProgram(shaderProgram);
 
     mvpLoc = glGetUniformLocation(shaderProgram, "uMVP");
-    eyePosLoc = glGetUniformLocation(shaderProgram, "uEyePos");
+    colorLoc = glGetUniformLocation(shaderProgram, "uColor");
+    isSelectedLoc = glGetUniformLocation(shaderProgram, "uIsSelected");
 
     glEnable(GL_DEPTH_TEST);
 
     int idx = 0;
-    for (int i = -8; i <= 8; i++) {
-        gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.005f; gridVertices[idx++] = -8.0f;
-        gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.005f; gridVertices[idx++] =  8.0f;
-        gridVertices[idx++] = -8.0f;    gridVertices[idx++] = 0.005f; gridVertices[idx++] = (float)i;
-        gridVertices[idx++] =  8.0f;    gridVertices[idx++] = 0.005f; gridVertices[idx++] = (float)i;
+    for (int i = -10; i <= 10; i++) {
+        gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.0f; gridVertices[idx++] = -10.0f;
+        gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.0f; gridVertices[idx++] =  10.0f;
+        gridVertices[idx++] = -10.0f;   gridVertices[idx++] = 0.0f; gridVertices[idx++] = (float)i;
+        gridVertices[idx++] =  10.0f;   gridVertices[idx++] = 0.0f; gridVertices[idx++] = (float)i;
     }
+
+    // Стартови 3D обекти за редактора
+    for (int i = 0; i < MAX_OBJECTS; i++) sceneObjects[i].active = false;
+
+    // Обект 1: Червена спортна кола
+    sceneObjects[0] = { true, 1, 0.0f, 0.5f, 0.0f, 1.2f, 0.0f, 0.9f, 0.2f, 0.2f };
+    // Обект 2: Синя сграда
+    sceneObjects[1] = { true, 0, -3.5f, 1.0f, -2.0f, 1.8f, 0.0f, 0.2f, 0.5f, 0.9f };
+    // Обект 3: Зелена кула
+    sceneObjects[2] = { true, 2,  3.5f, 1.5f, -1.0f, 1.0f, 0.0f, 0.2f, 0.8f, 0.3f };
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onSurfaceChanged(JNIEnv*, jobject, jint w, jint h) {
     glViewport(0, 0, w, h);
+    screenW = w;
+    screenH = h;
     aspect = (float)w / (float)(h > 0 ? h : 1);
 }
 
@@ -257,6 +150,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     if (shaderProgram == 0) return;
 
+    // Перспективна матрица
     float P[16];
     mat4_identity(P);
     float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
@@ -267,62 +161,203 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     P[14] = -(2.0f * 100.0f * 0.1f) / (100.0f - 0.1f);
     P[15] = 0.0f;
 
-    float eyeX = camDist * cosf(camPitch) * sinf(camYaw);
-    float eyeY = camDist * sinf(camPitch) + targetY;
-    float eyeZ = camDist * cosf(camPitch) * cosf(camYaw);
+    // View матрица за свободна FPS камера
+    float cP = cosf(camPitch), sP = sinf(camPitch);
+    float cY = cosf(camYaw),   sY = sinf(camYaw);
 
-    float V[16], VP[16];
-    mat4_lookat(V, eyeX, eyeY, eyeZ, 0.0f, targetY, 0.0f, 0.0f, 1.0f, 0.0f);
+    float forwardX = cP * sY, forwardY = sP, forwardZ = -cP * cY;
+    float rightX = cY, rightY = 0.0f, rightZ = sY;
+    float upX = -sP * sY, upY = cP, upZ = sP * cY;
+
+    float V[16];
+    mat4_identity(V);
+    V[0] = rightX;   V[1] = upX;   V[2] = -forwardX;  V[3] = 0.0f;
+    V[4] = rightY;   V[5] = upY;   V[6] = -forwardY;  V[7] = 0.0f;
+    V[8] = rightZ;   V[9] = upZ;   V[10]= -forwardZ;  V[11]= 0.0f;
+    V[12]= -(rightX*camX + rightY*camY + rightZ*camZ);
+    V[13]= -(upX*camX + upY*camY + upZ*camZ);
+    V[14]=  (forwardX*camX + forwardY*camY + forwardZ*camZ);
+    V[15]= 1.0f;
+
+    float VP[16];
     mat4_mul(VP, P, V);
 
     glUseProgram(shaderProgram);
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, VP);
-    glUniform3f(eyePosLoc, eyeX, eyeY, eyeZ);
 
-    if (!meshVertices.empty()) {
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshVertices[0].x);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshVertices[0].nx);
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshVertices[0].r);
+    // 1. Grid (Координатна мрежа на редактора)
+    float gridM[16], gridMVP[16];
+    mat4_identity(gridM);
+    mat4_mul(gridMVP, VP, gridM);
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, gridMVP);
+    glUniform3f(colorLoc, 0.38f, 0.42f, 0.48f);
+    glUniform1i(isSelectedLoc, 0);
 
-        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)meshVertices.size());
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
+    glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
 
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
-        glDisableVertexAttribArray(2);
+    // 2. Рендиране на 3D обектите в редактора
+    glEnableVertexAttribArray(1);
+    for (int i = 0; i < MAX_OBJECTS; i++) {
+        if (!sceneObjects[i].active) continue;
+
+        float rad = sceneObjects[i].rotY * 0.0174532925f;
+        float cR = cosf(rad), sR = sinf(rad);
+
+        float M[16], MVP[16];
+        mat4_identity(M);
+        M[0] = cR * sceneObjects[i].scale;
+        M[2] = sR * sceneObjects[i].scale;
+        M[5] = sceneObjects[i].scale;
+        M[8] = -sR * sceneObjects[i].scale;
+        M[10]= cR * sceneObjects[i].scale;
+        M[12]= sceneObjects[i].x;
+        M[13]= sceneObjects[i].y;
+        M[14]= sceneObjects[i].z;
+
+        mat4_mul(MVP, VP, M);
+
+        glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
+        glUniform3f(colorLoc, sceneObjects[i].r, sceneObjects[i].g, sceneObjects[i].b);
+        glUniform1i(isSelectedLoc, (i == selectedObjectIndex) ? 1 : 0);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), CUBE_DATA);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &CUBE_DATA[3]);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+    }
+
+    glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
+}
+
+// ДВИЖЕНИЕ НА КАМЕРАТА (чрез Джойстик)
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_moveCamera(JNIEnv*, jobject, jfloat forwardInput, jfloat strafeInput) {
+    float cY = cosf(camYaw), sY = sinf(camYaw);
+    float speed = 0.18f;
+
+    // Движение спрямо посоката на погледа
+    camX += (sY * forwardInput + cY * strafeInput) * speed;
+    camZ += (-cY * forwardInput + sY * strafeInput) * speed;
+}
+
+// ЗАВЪРТАНЕ НА ПОГЛЕДА (чрез Touch Drag)
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_rotateLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
+    camYaw += dx;
+    camPitch += dy;
+    if (camPitch > 1.3f) camPitch = 1.3f;
+    if (camPitch < -1.3f) camPitch = -1.3f;
+}
+
+// RAYCASTING: Клик върху обект за селекция
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aigame_engine_NativeEngine_pickObject(JNIEnv*, jobject, jfloat tapX, jfloat tapY) {
+    if (screenW <= 0 || screenH <= 0) return -1;
+
+    float ndcX = (2.0f * tapX) / (float)screenW - 1.0f;
+    float ndcY = 1.0f - (2.0f * tapY) / (float)screenH;
+
+    float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
+    float cP = cosf(camPitch), sP = sinf(camPitch);
+    float cY = cosf(camYaw),   sY = sinf(camYaw);
+
+    float fX = cP * sY, fY = sP, fZ = -cP * cY;
+    float rX = cY, rY = 0.0f, rZ = sY;
+    float uX = -sP * sY, uY = cP, uZ = sP * cY;
+
+    // Вектор на лъча от камерата в пространството
+    float rayX = fX + rX * (ndcX * tanHalf * aspect) + uX * (ndcY * tanHalf);
+    float rayY = fY + rY * (ndcX * tanHalf * aspect) + uY * (ndcY * tanHalf);
+    float rayZ = fZ + rZ * (ndcX * tanHalf * aspect) + uZ * (ndcY * tanHalf);
+    float len = sqrtf(rayX*rayX + rayY*rayY + rayZ*rayZ);
+    rayX /= len; rayY /= len; rayZ /= len;
+
+    // Търсене на най-близкия обект, пресечен от лъча
+    int closestIdx = -1;
+    float minT = 1e9f;
+
+    for (int i = 0; i < MAX_OBJECTS; i++) {
+        if (!sceneObjects[i].active) continue;
+
+        float ox = sceneObjects[i].x - camX;
+        float oy = sceneObjects[i].y - camY;
+        float oz = sceneObjects[i].z - camZ;
+
+        float dot = ox * rayX + oy * rayY + oz * rayZ;
+        if (dot < 0.0f) continue; // Зад камерата
+
+        float perpDistSq = (ox*ox + oy*oy + oz*oz) - (dot * dot);
+        float radius = sceneObjects[i].scale * 0.75f;
+
+        if (perpDistSq <= (radius * radius)) {
+            if (dot < minT) {
+                minT = dot;
+                closestIdx = i;
+            }
+        }
+    }
+
+    selectedObjectIndex = closestIdx;
+    return selectedObjectIndex;
+}
+
+// ОПЕРАЦИИ ВЪРХУ ИЗБРАНИЯ ОБЕКТ
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_deleteSelected(JNIEnv*, jobject) {
+    if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
+        sceneObjects[selectedObjectIndex].active = false;
+        selectedObjectIndex = -1;
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_loadObjString(JNIEnv* env, jobject, jstring objStr, jfloat r, jfloat g, jfloat b) {
-    const char* str = env->GetStringUTFChars(objStr, nullptr);
-    parseObjString(std::string(str), r, g, b);
-    env->ReleaseStringUTFChars(objStr, str);
+Java_com_aigame_engine_NativeEngine_duplicateSelected(JNIEnv*, jobject) {
+    if (selectedObjectIndex < 0 || selectedObjectIndex >= MAX_OBJECTS) return;
+    for (int i = 0; i < MAX_OBJECTS; i++) {
+        if (!sceneObjects[i].active) {
+            sceneObjects[i] = sceneObjects[selectedObjectIndex];
+            sceneObjects[i].x += 1.2f;
+            sceneObjects[i].z += 1.2f;
+            selectedObjectIndex = i; // Маркира новото копие
+            break;
+        }
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_clearMesh(JNIEnv*, jobject) {
-    meshVertices.clear();
+Java_com_aigame_engine_NativeEngine_scaleSelected(JNIEnv*, jobject, jfloat factor) {
+    if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
+        sceneObjects[selectedObjectIndex].scale *= factor;
+        if (sceneObjects[selectedObjectIndex].scale < 0.2f) sceneObjects[selectedObjectIndex].scale = 0.2f;
+        if (sceneObjects[selectedObjectIndex].scale > 8.0f) sceneObjects[selectedObjectIndex].scale = 8.0f;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_rotateCamera(JNIEnv*, jobject, jfloat dx, jfloat dy) {
-    camYaw += dx;
-    camPitch += dy;
-    if (camPitch > 1.45f) camPitch = 1.45f;
-    if (camPitch < 0.08f) camPitch = 0.08f;
+Java_com_aigame_engine_NativeEngine_rotateSelected(JNIEnv*, jobject, jfloat deg) {
+    if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
+        sceneObjects[selectedObjectIndex].rotY += deg;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_zoomCamera(JNIEnv*, jobject, jfloat zoom) {
-    camDist += zoom;
-    if (camDist < 2.0f) camDist = 2.0f;
-    if (camDist > 40.0f) camDist = 40.0f;
+Java_com_aigame_engine_NativeEngine_moveSelectedY(JNIEnv*, jobject, jfloat deltaY) {
+    if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
+        sceneObjects[selectedObjectIndex].y += deltaY;
+        if (sceneObjects[selectedObjectIndex].y < 0.2f) sceneObjects[selectedObjectIndex].y = 0.2f;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setBackgroundColor(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
-    bgR = r; bgG = g; bgB = b;
+Java_com_aigame_engine_NativeEngine_spawnNewObject(JNIEnv*, jobject) {
+    for (int i = 0; i < MAX_OBJECTS; i++) {
+        if (!sceneObjects[i].active) {
+            // Поставя нов обект точно пред камерата на земята
+            float fX = sinf(camYaw), fZ = -cosf(camYaw);
+            sceneObjects[i] = { true, 0, camX + fX * 4.0f, 0.7f, camZ + fZ * 4.0f, 1.2f, 0.0f, 0.9f, 0.5f, 0.1f };
+            selectedObjectIndex = i;
+            break;
+        }
+    }
 }
