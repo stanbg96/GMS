@@ -12,8 +12,7 @@ object NativeEngine {
     external fun setBackgroundColor(r: Float, g: Float, b: Float)
     external fun rotateCamera(dx: Float, dy: Float)
     external fun zoomCamera(zoom: Float)
-    external fun clearMesh()
 
-    // Процедурен синтез на гладки 3D модели
-    external fun generateModel(type: String, r: Float, g: Float, b: Float)
+    // Параметричен синтез на гладък суперкар
+    external fun generateSupercar(r: Float, g: Float, b: Float)
 }

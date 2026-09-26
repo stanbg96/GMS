@@ -68,7 +68,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS Procedural HD Studio е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS Spline Lofting Engine е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
@@ -115,17 +115,17 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 when (cmd) {
-                    "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearMesh()
-                    "GEN" -> {
-                        // Формат: GEN:TYPE:R,G,B (напр. GEN:CAR:0.95,0.12,0.1)
-                        val parts = rawValue.split(":")
-                        val type = parts[0].uppercase()
-                        var r = 0.95f; var g = 0.12f; var b = 0.1f
-                        if (parts.size > 1) {
-                            val rgb = parts[1].split(",").map { it.trim().toFloat() }
-                            if (rgb.size >= 3) { r = rgb[0]; g = rgb[1]; b = rgb[2] }
+                    "SUPERCAR", "CAR", "СУПЕРКАР", "КОЛА" -> {
+                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
+                        val rgb = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
+                        var r = 0.95f; var g = 0.12f; var b = 0.10f
+                        if (rgb.size >= 3) {
+                            r = rgb[0]; g = rgb[1]; b = rgb[2]
+                            if (r > 1.0f) r /= 255.0f
+                            if (g > 1.0f) g /= 255.0f
+                            if (b > 1.0f) b /= 255.0f
                         }
-                        NativeEngine.generateModel(type, r, g, b)
+                        NativeEngine.generateSupercar(r, g, b)
                     }
                     "BG" -> {
                         val rgb = rawValue.split(",").map { it.trim().toFloat() }

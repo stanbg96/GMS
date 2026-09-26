@@ -2,15 +2,14 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 #include <vector>
-#include <cstring>
 
-static float bgR = 0.52f, bgG = 0.65f, bgB = 0.80f;
+static float bgR = 0.55f, bgG = 0.68f, bgB = 0.82f;
 static float aspect = 1.0f;
 
 static float camYaw = 0.85f;
-static float camPitch = 0.45f;
-static float camDist = 14.0f;
-static float targetY = 0.8f;
+static float camPitch = 0.40f;
+static float camDist = 13.0f;
+static float targetY = 0.7f;
 
 struct Vertex {
     float x, y, z;
@@ -65,8 +64,8 @@ static const char* FRAGMENT_SHADER =
     "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
     "    vec3 V = normalize(uEyePos - vWorldPos);\n"
     "    vec3 H = normalize(L + V);\n"
-    "    float diff = max(dot(N, L), 0.0) * 0.65 + 0.35;\n"
-    "    float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.50;\n"
+    "    float diff = max(dot(N, L), 0.0) * 0.60 + 0.40;\n"
+    "    float spec = pow(max(dot(N, H), 0.0), 36.0) * 0.55;\n"
     "    vec3 finalCol = vColor * diff + vec3(spec);\n"
     "    FragColor = vec4(finalCol, 1.0);\n"
     "}\n";
@@ -113,36 +112,18 @@ static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float 
     m[15]= 1.0f;
 }
 
-static void addTri(const Vertex& v1, const Vertex& v2, const Vertex& v3) {
+// Добавяне на плавен четириъгълник от 2 триъгълника
+static void addSmoothQuad(const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex& v4) {
     meshVertices.push_back(v1);
     meshVertices.push_back(v2);
     meshVertices.push_back(v3);
+
+    meshVertices.push_back(v1);
+    meshVertices.push_back(v3);
+    meshVertices.push_back(v4);
 }
 
-// Изчисляване на нормала за плавен триъгълник
-static void addQuad(float x1, float y1, float z1,
-                    float x2, float y2, float z2,
-                    float x3, float y3, float z3,
-                    float x4, float y4, float z4,
-                    float r, float g, float b) {
-    float ux = x2 - x1, uy = y2 - y1, uz = z2 - z1;
-    float vx = x3 - x1, vy = y3 - y1, vz = z3 - z1;
-    float nx = uy * vz - uz * vy;
-    float ny = uz * vx - ux * vz;
-    float nz = ux * vy - uy * vx;
-    float len = sqrtf(nx*nx + ny*ny + nz*nz);
-    if (len > 0.0001f) { nx /= len; ny /= len; nz /= len; }
-
-    Vertex v1 = { x1, y1, z1, nx, ny, nz, r, g, b };
-    Vertex v2 = { x2, y2, z2, nx, ny, nz, r, g, b };
-    Vertex v3 = { x3, y3, z3, nx, ny, nz, r, g, b };
-    Vertex v4 = { x4, y4, z4, nx, ny, nz, r, g, b };
-
-    addTri(v1, v2, v3);
-    addTri(v1, v3, v4);
-}
-
-// 1. Истинско 3D колело с джанта и спици
+// 1. Истинско 3D колело с джанта и гума
 static void addWheel(float cx, float cy, float cz, float radius, float width) {
     const int segs = 16;
     float hw = width * 0.5f;
@@ -153,127 +134,104 @@ static void addWheel(float cx, float cy, float cz, float radius, float width) {
         float y0 = cosf(a0) * radius, z0 = sinf(a0) * radius;
         float y1 = cosf(a1) * radius, z1 = sinf(a1) * radius;
 
-        // Черна гума (Tire tread)
-        addQuad(cx - hw, cy + y0, cz + z0,
-                cx + hw, cy + y0, cz + z0,
-                cx + hw, cy + y1, cz + z1,
-                cx - hw, cy + y1, cz + z1,
-                0.12f, 0.12f, 0.12f);
+        Vertex v1 = { cx - hw, cy + y0, cz + z0, 0.0f, cosf(a0), sinf(a0), 0.12f, 0.12f, 0.12f };
+        Vertex v2 = { cx + hw, cy + y0, cz + z0, 0.0f, cosf(a0), sinf(a0), 0.12f, 0.12f, 0.12f };
+        Vertex v3 = { cx + hw, cy + y1, cz + z1, 0.0f, cosf(a1), sinf(a1), 0.12f, 0.12f, 0.12f };
+        Vertex v4 = { cx - hw, cy + y1, cz + z1, 0.0f, cosf(a1), sinf(a1), 0.12f, 0.12f, 0.12f };
+        addSmoothQuad(v1, v2, v3, v4);
 
-        // Сребриста алуминиева джанта
+        // Джанта
         float rimR = radius * 0.65f;
-        float ry0 = cosf(a0) * rimR, rz0 = sinf(a0) * rimR;
-        float ry1 = cosf(a1) * rimR, rz1 = sinf(a1) * rimR;
-
-        addQuad(cx + hw * 1.01f, cy + ry0, cz + rz0,
-                cx + hw * 1.01f, cy + y0, cz + z0,
-                cx + hw * 1.01f, cy + y1, cz + z1,
-                cx + hw * 1.01f, cy + ry1, cz + rz1,
-                0.80f, 0.82f, 0.85f);
+        Vertex r1 = { cx + hw * 1.01f, cy, cz, 1.0f, 0.0f, 0.0f, 0.85f, 0.88f, 0.90f };
+        Vertex r2 = { cx + hw * 1.01f, cy + cosf(a0)*rimR, cz + sinf(a0)*rimR, 1.0f, 0.0f, 0.0f, 0.85f, 0.88f, 0.90f };
+        Vertex r3 = { cx + hw * 1.01f, cy + cosf(a1)*rimR, cz + sinf(a1)*rimR, 1.0f, 0.0f, 0.0f, 0.85f, 0.88f, 0.90f };
+        meshVertices.push_back(r1); meshVertices.push_back(r2); meshVertices.push_back(r3);
     }
 }
 
-// 2. ХАКЕРСКИ ПАРАМЕТРИЧЕН ЛОФТИНГ НА СПОРТЕН АВТОМОБИЛ (Гладка аеродинамична форма)
-static void generateProceduralCar(float r, float g, float b) {
+// 2. ПАРАМЕТРИЧЕН ЛОФТИНГ НА ИСТИНСКИ СПОРТЕН СУПЕРКАР (Spline Lofting)
+static void generateProceduralSupercar(float r, float g, float b) {
     meshVertices.clear();
 
-    // 4 истински кръгли колела с джанти
-    addWheel(-1.15f, 0.42f,  1.35f, 0.45f, 0.30f);
-    addWheel( 1.15f, 0.42f,  1.35f, 0.45f, 0.30f);
-    addWheel(-1.15f, 0.42f, -1.35f, 0.48f, 0.34f);
-    addWheel( 1.15f, 0.42f, -1.35f, 0.48f, 0.34f);
+    // 4 кръгли колела с джанти
+    addWheel(-1.18f, 0.42f,  1.40f, 0.44f, 0.32f);
+    addWheel( 1.18f, 0.42f,  1.40f, 0.44f, 0.32f);
+    addWheel(-1.22f, 0.45f, -1.35f, 0.47f, 0.36f);
+    addWheel( 1.22f, 0.45f, -1.35f, 0.47f, 0.36f);
 
-    // Секции по дължината на колата (Z): от предна броня (+2.2) до спойлер (-2.2)
-    struct CarStation {
-        float z;
-        float yBottom, yTop;
-        float halfWidth;
-    };
+    const int stepsZ = 20; // 20 секции по дължината
+    const int stepsS = 12; // 12 точки по всяка извивка
 
-    CarStation stations[] = {
-        {  2.3f, 0.25f, 0.55f, 0.95f }, // 0: Предна броня
-        {  1.6f, 0.28f, 0.82f, 1.05f }, // 1: Преден капак (по-широк над гумите)
-        {  0.7f, 0.30f, 1.00f, 1.02f }, // 2: Основа на предното стъкло
-        { -0.1f, 0.30f, 1.45f, 0.88f }, // 3: Връх на предно стъкло / таван
-        { -0.9f, 0.30f, 1.40f, 0.88f }, // 4: Задно стъкло
-        { -1.7f, 0.30f, 0.95f, 1.10f }, // 5: Заден капак (мускулест калник)
-        { -2.3f, 0.35f, 0.85f, 1.00f }  // 6: Задна броня
-    };
-
-    int numStations = 7;
-
-    for (int i = 0; i < numStations - 1; i++) {
-        CarStation s0 = stations[i];
-        CarStation s1 = stations[i + 1];
-
-        float colR = r, colG = g, colB = b;
-        // Кабината (между станция 2 и 4) е с тъмни стъкла
-        if (i == 2 || i == 3) {
-            colR = 0.25f; colG = 0.55f; colB = 0.75f;
+    auto getProfile = [](float t, float& height, float& width) {
+        // Силует по дължината (Z): нос -> капак -> предно стъкло -> покрив -> заден спойлер
+        if (t < 0.20f) {
+            float k = t / 0.20f;
+            height = 0.30f + 0.38f * k * k; // Нисък остър нос
+            width = 0.85f + 0.30f * sinf(k * 3.14159f); // Предни калници
+        } else if (t < 0.42f) {
+            float k = (t - 0.20f) / 0.22f;
+            height = 0.68f + 0.68f * sinf(k * 1.57f); // Скосено аеродинамично стъкло
+            width = 1.05f - 0.10f * k; // Стесняване около кабината
+        } else if (t < 0.68f) {
+            float k = (t - 0.42f) / 0.26f;
+            height = 1.36f + 0.04f * sinf(k * 3.14159f); // Нисък спортен покрив
+            width = 0.95f + 0.30f * k; // Разширяване към задните калници
+        } else if (t < 0.88f) {
+            float k = (t - 0.68f) / 0.20f;
+            height = 1.36f - 0.55f * k; // Плавно спускане на задното стъкло (Fastback)
+            width = 1.25f; // Широка мускулеста задница
+        } else {
+            float k = (t - 0.88f) / 0.12f;
+            height = 0.81f + 0.22f * sinf(k * 1.57f); // Заден антикрил / спойлер
+            width = 1.15f;
         }
+    };
 
-        // Горна аеродинамична повърхност (капак, таван, багажник)
-        addQuad(-s0.halfWidth * 0.7f, s0.yTop, s0.z,
-                 s0.halfWidth * 0.7f, s0.yTop, s0.z,
-                 s1.halfWidth * 0.7f, s1.yTop, s1.z,
-                -s1.halfWidth * 0.7f, s1.yTop, s1.z,
-                colR, colG, colB);
+    float lengthZ = 4.8f;
+    float halfL = lengthZ * 0.5f;
 
-        // Странични заоблени панели (калници и врати)
-        // Лява страна:
-        addQuad(-s0.halfWidth, s0.yBottom, s0.z,
-                -s0.halfWidth * 0.7f, s0.yTop, s0.z,
-                -s1.halfWidth * 0.7f, s1.yTop, s1.z,
-                -s1.halfWidth, s1.yBottom, s1.z,
-                r * 0.9f, g * 0.9f, b * 0.9f);
+    for (int iz = 0; iz < stepsZ; iz++) {
+        float t0 = (float)iz / (float)stepsZ;
+        float t1 = (float)(iz + 1) / (float)stepsZ;
 
-        // Дясна страна:
-        addQuad( s0.halfWidth * 0.7f, s0.yTop, s0.z,
-                 s0.halfWidth, s0.yBottom, s0.z,
-                 s1.halfWidth, s1.yBottom, s1.z,
-                 s1.halfWidth * 0.7f, s1.yTop, s1.z,
-                r * 0.9f, g * 0.9f, b * 0.9f);
+        float z0 = halfL - t0 * lengthZ;
+        float z1 = halfL - t1 * lengthZ;
+
+        float h0, w0, h1, w1;
+        getProfile(t0, h0, w0);
+        getProfile(t1, h1, w1);
+
+        bool isGlass0 = (t0 >= 0.35f && t0 <= 0.72f);
+        bool isGlass1 = (t1 >= 0.35f && t1 <= 0.72f);
+
+        for (int is = 0; is < stepsS; is++) {
+            float s0 = -1.57079f + (float)is * 3.14159f / (float)stepsS;
+            float s1 = -1.57079f + (float)(is + 1) * 3.14159f / (float)stepsS;
+
+            float x00 = w0 * sinf(s0), y00 = 0.22f + (h0 - 0.22f) * cosf(s0);
+            float x01 = w0 * sinf(s1), y01 = 0.22f + (h0 - 0.22f) * cosf(s1);
+            float x10 = w1 * sinf(s0), y10 = 0.22f + (h1 - 0.22f) * cosf(s0);
+            float x11 = w1 * sinf(s1), y11 = 0.22f + (h1 - 0.22f) * cosf(s1);
+
+            float colR = r, colG = g, colB = b;
+            if ((isGlass0 || isGlass1) && (fabsf(s0) < 1.0f || fabsf(s1) < 1.0f)) {
+                colR = 0.22f; colG = 0.45f; colB = 0.65f; // Тонирано стъкло
+            }
+
+            // Изчисляване на гладки нормали за всяка точка
+            float nx00 = sinf(s0), ny00 = cosf(s0), nz00 = 0.1f;
+            float nx01 = sinf(s1), ny01 = cosf(s1), nz01 = 0.1f;
+            float nx10 = sinf(s0), ny10 = cosf(s0), nz10 = -0.1f;
+            float nx11 = sinf(s1), ny11 = cosf(s1), nz11 = -0.1f;
+
+            Vertex v1 = { x00, y00, z0, nx00, ny00, nz00, colR, colG, colB };
+            Vertex v2 = { x01, y01, z0, nx01, ny01, nz01, colR, colG, colB };
+            Vertex v3 = { x11, y11, z1, nx11, ny11, nz11, colR, colG, colB };
+            Vertex v4 = { x10, y10, z1, nx10, ny10, nz10, colR, colG, colB };
+
+            addSmoothQuad(v1, v2, v3, v4);
+        }
     }
-
-    // Предни ксенонови фарове
-    addQuad(-0.85f, 0.55f, 2.25f, -0.45f, 0.55f, 2.28f, -0.45f, 0.70f, 2.15f, -0.85f, 0.70f, 2.12f, 1.0f, 1.0f, 0.8f);
-    addQuad( 0.45f, 0.55f, 2.28f,  0.85f, 0.55f, 2.25f,  0.85f, 0.70f, 2.12f,  0.45f, 0.70f, 2.15f, 1.0f, 1.0f, 0.8f);
-
-    // Задни LED стопове
-    addQuad(-0.90f, 0.70f, -2.31f, 0.90f, 0.70f, -2.31f, 0.90f, 0.80f, -2.28f, -0.90f, 0.80f, -2.28f, 0.95f, 0.1f, 0.1f);
-
-    // Спортен заден карбонов спойлер
-    addQuad(-1.0f, 1.15f, -2.15f, 1.0f, 1.15f, -2.15f, 1.0f, 1.18f, -2.45f, -1.0f, 1.18f, -2.45f, 0.15f, 0.15f, 0.15f);
-}
-
-// 3. БЪЛГАРСКА ВЪЗРОЖДЕНСКА КЪЩА (Каменен зид, бял еркер, чардак и керемиден 4-скатен покрив)
-static void generateProceduralHouse(float r, float g, float b) {
-    meshVertices.clear();
-
-    // Каменен приземен етаж (сива каменна зидария)
-    addQuad(-2.2f, 0.0f,  2.0f,  2.2f, 0.0f,  2.0f,  2.2f, 1.6f,  2.0f, -2.2f, 1.6f,  2.0f, 0.42f, 0.42f, 0.44f);
-    addQuad( 2.2f, 0.0f,  2.0f,  2.2f, 0.0f, -2.0f,  2.2f, 1.6f, -2.0f,  2.2f, 1.6f,  2.0f, 0.38f, 0.38f, 0.40f);
-    addQuad( 2.2f, 0.0f, -2.0f, -2.2f, 0.0f, -2.0f, -2.2f, 1.6f, -2.0f,  2.2f, 1.6f, -2.0f, 0.42f, 0.42f, 0.44f);
-    addQuad(-2.2f, 0.0f, -2.0f, -2.2f, 0.0f,  2.0f, -2.2f, 1.6f,  2.0f, -2.2f, 1.6f, -2.0f, 0.38f, 0.38f, 0.40f);
-
-    // Изнесен втори етаж (бял еркер с дървени греди, стърчащ навън)
-    addQuad(-2.6f, 1.6f,  2.4f,  2.6f, 1.6f,  2.4f,  2.6f, 3.2f,  2.4f, -2.6f, 3.2f,  2.4f, 0.96f, 0.95f, 0.92f);
-    addQuad( 2.6f, 1.6f,  2.4f,  2.6f, 1.6f, -2.4f,  2.6f, 3.2f, -2.4f,  2.6f, 3.2f,  2.4f, 0.90f, 0.89f, 0.86f);
-    addQuad( 2.6f, 1.6f, -2.4f, -2.6f, 1.6f, -2.4f, -2.6f, 3.2f, -2.4f,  2.6f, 3.2f, -2.4f, 0.96f, 0.95f, 0.92f);
-    addQuad(-2.6f, 1.6f, -2.4f, -2.6f, 1.6f,  2.4f, -2.6f, 3.2f,  2.4f, -2.6f, 3.2f, -2.4f, 0.90f, 0.89f, 0.86f);
-
-    // Тъмни дървени носещи греди под еркера
-    addQuad(-2.6f, 1.6f, 2.4f, -2.4f, 1.6f, 2.4f, -2.2f, 1.0f, 2.0f, -2.4f, 1.0f, 2.0f, 0.30f, 0.18f, 0.10f);
-    addQuad( 2.4f, 1.6f, 2.4f,  2.6f, 1.6f, 2.4f,  2.4f, 1.0f, 2.0f,  2.2f, 1.0f, 2.0f, 0.30f, 0.18f, 0.10f);
-
-    // Автентичен 4-скатен надвесен керемиден покрив (стърчащ 60 см над стените)
-    float roofBaseY = 3.2f;
-    float roofPeakY = 4.4f;
-
-    // Преден скат:
-    addQuad(-3.1f, roofBaseY,  2.8f,  3.1f, roofBaseY,  2.8f,  1.8f, roofPeakY,  0.5f, -1.8f, roofPeakY,  0.5f, 0.78f, 0.32f, 0.18f);
-    // Заден скат:
-    addQuad( 3.1f, roofBaseY, -2.8f, -3.1f, roofBaseY, -2.8f, -1.8f, roofPeakY, -0.5f,  1.8f, roofPeakY, -0.5f, 0.70f, 0.28f, 0.15f);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -356,23 +314,9 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     }
 }
 
-// JNI функция за процедурно генериране
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_generateModel(JNIEnv* env, jobject, jstring typeStr, jfloat r, jfloat g, jfloat b) {
-    const char* str = env->GetStringUTFChars(typeStr, nullptr);
-
-    if (strcmp(str, "CAR") == 0) {
-        generateProceduralCar(r, g, b);
-    } else if (strcmp(str, "HOUSE") == 0) {
-        generateProceduralHouse(r, g, b);
-    }
-
-    env->ReleaseStringUTFChars(typeStr, str);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_clearMesh(JNIEnv*, jobject) {
-    meshVertices.clear();
+Java_com_aigame_engine_NativeEngine_generateSupercar(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
+    generateProceduralSupercar(r, g, b);
 }
 
 extern "C" JNIEXPORT void JNICALL

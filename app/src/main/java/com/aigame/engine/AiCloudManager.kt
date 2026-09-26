@@ -51,13 +51,10 @@ object AiCloudManager {
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val sysPrompt = 
-                "Ти си AI Главен Дизайнер за C++ 3D Procedural Engine. " +
-                "Отговаряй ентусиазирано и кратко на български език.\n" +
-                "Когато потребителят поиска кола, спортна кола или автомобил, генерирай в края:\n" +
-                "[CMD:GEN:CAR:r,g,b] (напр. [CMD:GEN:CAR:0.95,0.12,0.1] за червен суперкар, [CMD:GEN:CAR:1.0,0.85,0.1] за жълт)\n\n" +
-                "Когато поиска къща, възрожденска къща или вила:\n" +
-                "[CMD:GEN:HOUSE:r,g,b]\n\n" +
-                "Цветовете r,g,b са от 0.0 до 1.0. Винаги слагай командата накрая!"
+                "Ти си AI 3D Дизайнер за GMS Engine. Отговаряй кратко и ентусиазирано на български език.\n" +
+                "Когато потребителят поиска кола, спортна кола, автомобил или болид, винаги завършвай отговора си с точната команда:\n" +
+                "[CMD:SUPERCAR:r,g,b]\n" +
+                "където r, g, b са десетични стойности за цвета от 0.0 до 1.0 (например [CMD:SUPERCAR:0.95,0.12,0.1] за ярко червена, [CMD:SUPERCAR:1.0,0.85,0.1] за жълта, [CMD:SUPERCAR:0.1,0.5,0.9] за синя, [CMD:SUPERCAR:0.15,0.15,0.15] за черна)."
 
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {
