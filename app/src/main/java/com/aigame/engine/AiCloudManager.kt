@@ -22,20 +22,10 @@ object AiCloudManager {
         val models = mutableListOf<String>()
         try {
             val request = when (provider) {
-                "Google Gemini" -> Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
-                    .build()
-                "OpenAI" -> Request.Builder()
-                    .url("https://api.openai.com/v1/models")
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
-                "OpenRouter" -> Request.Builder()
-                    .url("https://openrouter.ai/api/v1/models")
-                    .addHeader("Authorization", "Bearer $apiKey")
-                    .build()
-                "Anthropic" -> {
-                    return@withContext listOf("claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307")
-                }
+                "Google Gemini" -> Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey").build()
+                "OpenAI" -> Request.Builder().url("https://api.openai.com/v1/models").addHeader("Authorization", "Bearer $apiKey").build()
+                "OpenRouter" -> Request.Builder().url("https://openrouter.ai/api/v1/models").addHeader("Authorization", "Bearer $apiKey").build()
+                "Anthropic" -> return@withContext listOf("claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307")
                 else -> return@withContext emptyList()
             }
 
@@ -46,15 +36,10 @@ object AiCloudManager {
                 val json = JSONObject(body)
                 if (provider == "Google Gemini") {
                     val arr = json.getJSONArray("models")
-                    for (i in 0 until arr.length()) {
-                        val name = arr.getJSONObject(i).getString("name").replace("models/", "")
-                        models.add(name)
-                    }
+                    for (i in 0 until arr.length()) models.add(arr.getJSONObject(i).getString("name").replace("models/", ""))
                 } else {
                     val arr = json.getJSONArray("data")
-                    for (i in 0 until arr.length()) {
-                        models.add(arr.getJSONObject(i).getString("id"))
-                    }
+                    for (i in 0 until arr.length()) models.add(arr.getJSONObject(i).getString("id"))
                 }
             }
         } catch (e: Exception) {
@@ -66,14 +51,12 @@ object AiCloudManager {
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val sysPrompt = 
-                "Ти си AI Game Master за 3D енджина GMS. Отговаряй кратко и ясно на български език.\n" +
-                "Когато потребителят поиска промяна на света, куба или камерата, добавяй съответните команди в края:\n" +
-                "[CMD:BG:r,g,b] - цвят на небето (стойности 0.0 до 1.0)\n" +
-                "[CMD:CUBE_COLOR:r,g,b] - цвят на куба (стойности 0.0 до 1.0)\n" +
-                "[CMD:CUBE:on] или [CMD:CUBE:off] - показване/скриване\n" +
-                "[CMD:SPEED:число] - скорост на въртене (напр. 0.1, 0.5, 1.0, 3.0)\n" +
-                "[CMD:SCALE:число] - размер/мащаб на куба (стандартно е 0.8; по-малко: 0.3; по-голямо: 1.5)\n" +
-                "Пример: 'Намалих размера на куба наполовина!\n[CMD:SCALE:0.4]'"
+                "Ти си AI Game Master за 3D енджина GMS. Отговаряй ентусиазирано и кратко на български език.\n" +
+                "Когато потребителят поиска изграждане на свят, сцена, кула, къща, кола или обект, генерирай команди в края на отговора:\n" +
+                "[CMD:CLEAR] - изчиства света преди ново строене\n" +
+                "[CMD:BG:r,g,b] - цвят на небето\n" +
+                "[CMD:SPAWN:x,y,z,scale,r,g,b] - поставя куб на дадени координати с определен мащаб и цвят (Земята/подът е на Y=0.0).\n" +
+                "ВАЖНО: Можеш и ТРЯБВА да генерираш МНОГО [CMD:SPAWN:...] команди една след друга (до 30-40 куба), за да строиш истински структури (стълби, кули, пирамиди, гори)!"
 
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {
@@ -81,14 +64,8 @@ object AiCloudManager {
                     val jsonBody = JSONObject().apply {
                         put("model", model)
                         val msgs = JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("role", "system")
-                                put("content", sysPrompt)
-                            })
-                            put(JSONObject().apply {
-                                put("role", "user")
-                                put("content", prompt)
-                            })
+                            put(JSONObject().apply { put("role", "system"); put("content", sysPrompt) })
+                            put(JSONObject().apply { put("role", "user"); put("content", prompt) })
                         }
                         put("messages", msgs)
                     }
@@ -111,9 +88,7 @@ object AiCloudManager {
                         val contents = JSONArray().apply {
                             put(JSONObject().apply {
                                 val parts = JSONArray().apply {
-                                    put(JSONObject().apply {
-                                        put("text", "$sysPrompt\n\nПотребител: $prompt")
-                                    })
+                                    put(JSONObject().apply { put("text", "$sysPrompt\n\nПотребител: $prompt") })
                                 }
                                 put("parts", parts)
                             })
@@ -121,10 +96,7 @@ object AiCloudManager {
                         put("contents", contents)
                     }
 
-                    Request.Builder()
-                        .url(endpoint)
-                        .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
-                        .build()
+                    Request.Builder().url(endpoint).post(jsonBody.toString().toRequestBody(JSON_MEDIA)).build()
                 }
                 "Anthropic" -> {
                     val endpoint = "https://api.anthropic.com/v1/messages"
@@ -133,10 +105,7 @@ object AiCloudManager {
                         put("max_tokens", 1024)
                         put("system", sysPrompt)
                         val msgs = JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("role", "user")
-                                put("content", prompt)
-                            })
+                            put(JSONObject().apply { put("role", "user"); put("content", prompt) })
                         }
                         put("messages", msgs)
                     }
@@ -148,27 +117,19 @@ object AiCloudManager {
                         .post(jsonBody.toString().toRequestBody(JSON_MEDIA))
                         .build()
                 }
-                else -> return@withContext "Неподдържан AI доставчик: $provider"
+                else -> return@withContext "Неподдържан AI: $provider"
             }
 
             val response = client.newCall(request).execute()
-            val body = response.body?.string() ?: return@withContext "Празен отговор от сървъра."
+            val body = response.body?.string() ?: return@withContext "Празен отговор."
 
-            if (!response.isSuccessful) {
-                return@withContext "Грешка (${response.code}): $body"
-            }
+            if (!response.isSuccessful) return@withContext "Грешка (${response.code}): $body"
 
             val json = JSONObject(body)
             return@withContext when (provider) {
-                "OpenRouter", "OpenAI" -> {
-                    json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-                }
-                "Google Gemini" -> {
-                    json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                }
-                "Anthropic" -> {
-                    json.getJSONArray("content").getJSONObject(0).getString("text")
-                }
+                "OpenRouter", "OpenAI" -> json.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+                "Google Gemini" -> json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                "Anthropic" -> json.getJSONArray("content").getJSONObject(0).getString("text")
                 else -> body
             }
         } catch (e: Exception) {

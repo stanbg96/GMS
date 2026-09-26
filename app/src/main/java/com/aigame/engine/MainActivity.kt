@@ -1,9 +1,11 @@
 package com.aigame.engine
 
+import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -21,6 +23,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var glSurfaceView: GLSurfaceView
     private lateinit var prefs: SharedPreferences
 
+    private var prevTouchX = 0f
+    private var prevTouchY = 0f
+
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -30,6 +36,24 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView = findViewById(R.id.gl_surface_view)
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
+
+        // 360° Тъч управление на камерата с пръст
+        glSurfaceView.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    prevTouchX = event.x
+                    prevTouchY = event.y
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (event.x - prevTouchX) * 0.005f
+                    val dy = (event.y - prevTouchY) * 0.005f
+                    NativeEngine.rotateCamera(dx, dy)
+                    prevTouchX = event.x
+                    prevTouchY = event.y
+                }
+            }
+            true
+        }
 
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
@@ -43,14 +67,12 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS 3D Engine е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: 3D Свят и Grid активни. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
 
-        btnAiCloud.setOnClickListener {
-            showAiCloudDialog()
-        }
+        btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
         btnSend.setOnClickListener {
             val text = chatInput.text.toString().trim()
@@ -60,7 +82,7 @@ class MainActivity : AppCompatActivity() {
                 val model = prefs.getString("ai_model", "") ?: ""
 
                 if (key.isEmpty() || model.isEmpty() || model == "Не е избран") {
-                    addMessage("Система: Моля, настройте AI Cloud от синия бутон първо!", false)
+                    addMessage("Система: Моля, настройте AI Cloud първо!", false)
                     return@setOnClickListener
                 }
 
@@ -83,7 +105,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseAndExecuteCommands(reply: String): String {
-        val regex = Regex("\\[CMD:([A-Z_]+):([^\\]]+)\\]")
+        val regex = Regex("\\[CMD:([A-Z_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
 
         for (match in matches) {
@@ -92,22 +114,16 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 when (cmd) {
+                    "CLEAR" -> NativeEngine.clearWorld()
                     "BG" -> {
                         val rgb = value.split(",").map { it.trim().toFloat() }
                         if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
                     }
-                    "CUBE_COLOR" -> {
-                        val rgb = value.split(",").map { it.trim().toFloat() }
-                        if (rgb.size == 3) NativeEngine.setCubeColor(rgb[0], rgb[1], rgb[2])
-                    }
-                    "CUBE" -> {
-                        NativeEngine.setCubeVisible(value.lowercase() == "on")
-                    }
-                    "SPEED" -> {
-                        NativeEngine.setRotationSpeed(value.trim().toFloat())
-                    }
-                    "SCALE" -> {
-                        NativeEngine.setCubeScale(value.trim().toFloat())
+                    "SPAWN" -> {
+                        val p = value.split(",").map { it.trim().toFloat() }
+                        if (p.size == 7) {
+                            NativeEngine.spawnCube(p[0], p[1], p[2], p[3], p[4], p[5], p[6])
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -164,7 +180,7 @@ class MainActivity : AppCompatActivity() {
                     tvStatus.text = "Успех! Намерени ${models.size} модела."
                     tvStatus.setTextColor(0xFF00FF00.toInt())
                 } else {
-                    tvStatus.text = "Грешка! Провери ключа или връзката."
+                    tvStatus.text = "Грешка! Провери ключа или интернета."
                     tvStatus.setTextColor(0xFFFF0000.toInt())
                 }
             }

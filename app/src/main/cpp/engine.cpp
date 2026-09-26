@@ -1,18 +1,31 @@
 #include <jni.h>
 #include <GLES3/gl3.h>
 #include <cmath>
-#include <android/log.h>
 
 static float bgR = 0.08f, bgG = 0.09f, bgB = 0.12f;
-static float cubeR = 0.1f, cubeG = 0.4f, cubeB = 0.9f; // Красиво синьо
-static bool showCube = true;
-static float rotSpeed = 0.2f; // По-плавно въртене по подразбиране
-static float cubeScale = 0.8f;
-static float currentAngle = 0.0f;
+static float aspect = 1.0f;
+
+// 3D Камера
+static float camYaw = 0.5f;
+static float camPitch = 0.4f;
+static float camDist = 8.0f;
+
+// Обектен пул за много тела в света
+struct Entity {
+    bool active;
+    float x, y, z;
+    float scale;
+    float r, g, b;
+};
+
+#define MAX_ENTITIES 128
+static Entity entityPool[MAX_ENTITIES];
 
 static GLuint shaderProgram = 0;
 static GLint mvpLoc = -1, modelLoc = -1, colorLoc = -1;
-static float aspect = 1.0f;
+
+#define GRID_LINES 34
+static float gridVertices[GRID_LINES * 2 * 3];
 
 static const float CUBE_VERTICES[] = {
     -0.5f, -0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
@@ -49,7 +62,7 @@ static const char* FRAGMENT_SHADER =
     "void main() {\n"
     "    vec3 N = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));\n"
     "    vec3 L = normalize(vec3(0.5, 1.0, 0.7));\n"
-    "    float diff = max(dot(N, L), 0.25);\n"
+    "    float diff = max(dot(N, L), 0.28);\n"
     "    FragColor = vec4(uColor * diff, 1.0);\n"
     "}\n";
 
@@ -91,6 +104,19 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     colorLoc = glGetUniformLocation(shaderProgram, "uColor");
 
     glEnable(GL_DEPTH_TEST);
+
+    // Генериране на 3D решетка (Grid на пода)
+    int idx = 0;
+    for (int i = -8; i <= 8; i++) {
+        gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.0f; gridVertices[idx++] = -8.0f;
+        gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.0f; gridVertices[idx++] =  8.0f;
+        gridVertices[idx++] = -8.0f;    gridVertices[idx++] = 0.0f; gridVertices[idx++] = (float)i;
+        gridVertices[idx++] =  8.0f;    gridVertices[idx++] = 0.0f; gridVertices[idx++] = (float)i;
+    }
+
+    // Стартов обект в центъра
+    entityPool[0] = { true, 0.0f, 0.5f, 0.0f, 1.0f, 0.2f, 0.6f, 1.0f };
+    for (int i = 1; i < MAX_ENTITIES; i++) entityPool[i].active = false;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -104,11 +130,9 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glClearColor(bgR, bgG, bgB, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    if (!showCube || shaderProgram == 0) return;
+    if (shaderProgram == 0) return;
 
-    currentAngle += 0.02f * rotSpeed;
-
-    // 1. Perspective Projection
+    // Перспективна матрица (Projection)
     float P[16];
     mat4_identity(P);
     float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
@@ -119,56 +143,97 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     P[14] = -(2.0f * 100.0f * 0.1f) / (100.0f - 0.1f);
     P[15] = 0.0f;
 
-    // 2. Model Matrix (Мащаб, Ротация, Отдалечаване назад на Z = -3.2)
-    float M[16], R[16], S[16];
-    mat4_identity(M);
-    M[14] = -3.2f; // Камерата е назад
+    // Камера (View Matrix) с орбитално завъртане
+    float V[16], RotX[16], RotY[16], Trans[16];
+    mat4_identity(Trans); Trans[14] = -camDist;
 
-    mat4_identity(S);
-    S[0] = cubeScale; S[5] = cubeScale; S[10] = cubeScale;
+    mat4_identity(RotX);
+    float cX = cosf(camPitch), sX = sinf(camPitch);
+    RotX[5] = cX; RotX[6] = -sX; RotX[9] = sX; RotX[10] = cX;
 
-    mat4_identity(R);
-    float cY = cosf(currentAngle), sY = sinf(currentAngle);
-    float cX = cosf(currentAngle * 0.7f), sX = sinf(currentAngle * 0.7f);
-    R[0] = cY; R[2] = sY; R[5] = cX; R[6] = -sX; R[8] = -sY; R[9] = sX; R[10] = cY * cX;
+    mat4_identity(RotY);
+    float cY = cosf(camYaw), sY = sinf(camYaw);
+    RotY[0] = cY; RotY[2] = sY; RotY[8] = -sY; RotY[10] = cY;
 
-    float model[16], mvp[16];
-    mat4_mul(model, M, R);
-    mat4_mul(model, model, S);
-    mat4_mul(mvp, P, model);
+    mat4_mul(V, Trans, RotX);
+    mat4_mul(V, V, RotY);
+
+    float VP[16];
+    mat4_mul(VP, P, V);
 
     glUseProgram(shaderProgram);
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, model);
-    glUniform3f(colorLoc, cubeR, cubeG, cubeB);
+
+    // 1. Рендиране на пода (Grid)
+    float gridM[16], gridMVP[16];
+    mat4_identity(gridM);
+    mat4_mul(gridMVP, VP, gridM);
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, gridMVP);
+    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, gridM);
+    glUniform3f(colorLoc, 0.35f, 0.4f, 0.45f);
 
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, CUBE_VERTICES);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
+    glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
+
+    // 2. Рендиране на всички активни кубове от пула
+    for (int i = 0; i < MAX_ENTITIES; i++) {
+        if (!entityPool[i].active) continue;
+
+        float M[16], S[16], T[16], MVP[16];
+        mat4_identity(T);
+        T[12] = entityPool[i].x;
+        T[13] = entityPool[i].y;
+        T[14] = entityPool[i].z;
+
+        mat4_identity(S);
+        float sc = entityPool[i].scale;
+        S[0] = sc; S[5] = sc; S[10] = sc;
+
+        mat4_mul(M, T, S);
+        mat4_mul(MVP, VP, M);
+
+        glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, M);
+        glUniform3f(colorLoc, entityPool[i].r, entityPool[i].g, entityPool[i].b);
+
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, CUBE_VERTICES);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+    }
+
     glDisableVertexAttribArray(0);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_rotateCamera(JNIEnv*, jobject, jfloat dx, jfloat dy) {
+    camYaw += dx;
+    camPitch += dy;
+    if (camPitch > 1.5f) camPitch = 1.5f;
+    if (camPitch < 0.05f) camPitch = 0.05f;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_zoomCamera(JNIEnv*, jobject, jfloat zoom) {
+    camDist += zoom;
+    if (camDist < 2.5f) camDist = 2.5f;
+    if (camDist > 30.0f) camDist = 30.0f;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_clearWorld(JNIEnv*, jobject) {
+    for (int i = 0; i < MAX_ENTITIES; i++) entityPool[i].active = false;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_spawnCube(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat scale, jfloat r, jfloat g, jfloat b) {
+    for (int i = 0; i < MAX_ENTITIES; i++) {
+        if (!entityPool[i].active) {
+            entityPool[i] = { true, x, y, z, scale, r, g, b };
+            break;
+        }
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_setBackgroundColor(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
     bgR = r; bgG = g; bgB = b;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setCubeColor(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
-    cubeR = r; cubeG = g; cubeB = b;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setCubeVisible(JNIEnv*, jobject, jboolean visible) {
-    showCube = visible;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setRotationSpeed(JNIEnv*, jobject, jfloat speed) {
-    rotSpeed = speed;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setCubeScale(JNIEnv*, jobject, jfloat scale) {
-    cubeScale = scale;
 }

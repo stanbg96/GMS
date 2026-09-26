@@ -10,8 +10,8 @@ object NativeEngine {
     external fun onDrawFrame()
 
     external fun setBackgroundColor(r: Float, g: Float, b: Float)
-    external fun setCubeColor(r: Float, g: Float, b: Float)
-    external fun setCubeVisible(visible: Boolean)
-    external fun setRotationSpeed(speed: Float)
-    external fun setCubeScale(scale: Float)
+    external fun rotateCamera(dx: Float, dy: Float)
+    external fun zoomCamera(zoom: Float)
+    external fun spawnCube(x: Float, y: Float, z: Float, scale: Float, r: Float, g: Float, b: Float)
+    external fun clearWorld()
 }
