@@ -2,15 +2,13 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 
-static float bgR = 0.08f, bgG = 0.09f, bgB = 0.12f;
+static float bgR = 0.45f, bgG = 0.7f, bgB = 0.95f; // Красиво небе по подразбиране
 static float aspect = 1.0f;
 
-// 3D Камера
-static float camYaw = 0.5f;
-static float camPitch = 0.4f;
-static float camDist = 8.0f;
+static float camYaw = 0.7f;
+static float camPitch = 0.45f;
+static float camDist = 13.0f; // Отдалечена камера, за да се виждат цели сгради
 
-// Обектен пул за много тела в света
 struct Entity {
     bool active;
     float x, y, z;
@@ -22,48 +20,65 @@ struct Entity {
 static Entity entityPool[MAX_ENTITIES];
 
 static GLuint shaderProgram = 0;
-static GLint mvpLoc = -1, modelLoc = -1, colorLoc = -1;
+static GLint mvpLoc = -1, colorLoc = -1;
 
 #define GRID_LINES 34
 static float gridVertices[GRID_LINES * 2 * 3];
 
-static const float CUBE_VERTICES[] = {
-    -0.5f, -0.5f,  0.5f,   0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
-    -0.5f, -0.5f,  0.5f,   0.5f,  0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,
-    -0.5f, -0.5f, -0.5f,  -0.5f,  0.5f, -0.5f,   0.5f,  0.5f, -0.5f,
-    -0.5f, -0.5f, -0.5f,   0.5f,  0.5f, -0.5f,   0.5f, -0.5f, -0.5f,
-    -0.5f,  0.5f, -0.5f,  -0.5f,  0.5f,  0.5f,   0.5f,  0.5f,  0.5f,
-    -0.5f,  0.5f, -0.5f,   0.5f,  0.5f,  0.5f,   0.5f,  0.5f, -0.5f,
-    -0.5f, -0.5f, -0.5f,   0.5f, -0.5f, -0.5f,   0.5f, -0.5f,  0.5f,
-    -0.5f, -0.5f, -0.5f,   0.5f, -0.5f,  0.5f,  -0.5f, -0.5f,  0.5f,
-     0.5f, -0.5f, -0.5f,   0.5f,  0.5f, -0.5f,   0.5f,  0.5f,  0.5f,
-     0.5f, -0.5f, -0.5f,   0.5f,  0.5f,  0.5f,   0.5f, -0.5f,  0.5f,
-    -0.5f, -0.5f, -0.5f,  -0.5f, -0.5f,  0.5f,  -0.5f,  0.5f,  0.5f,
-    -0.5f, -0.5f, -0.5f,  -0.5f,  0.5f,  0.5f,  -0.5f,  0.5f, -0.5f
+// 36 върха: Позиция (X,Y,Z) + Нормали (NX,NY,NZ)
+static const float CUBE_DATA[] = {
+    // Front (+Z)
+    -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,
+    -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,  -0.5f, 0.5f, 0.5f,  0,0,1,
+    // Back (-Z)
+    -0.5f,-0.5f,-0.5f,  0,0,-1, -0.5f, 0.5f,-0.5f,  0,0,-1,  0.5f, 0.5f,-0.5f,  0,0,-1,
+    -0.5f,-0.5f,-0.5f,  0,0,-1,  0.5f, 0.5f,-0.5f,  0,0,-1,  0.5f,-0.5f,-0.5f,  0,0,-1,
+    // Top (+Y)
+    -0.5f, 0.5f,-0.5f,  0,1,0,  -0.5f, 0.5f, 0.5f,  0,1,0,   0.5f, 0.5f, 0.5f,  0,1,0,
+    -0.5f, 0.5f,-0.5f,  0,1,0,   0.5f, 0.5f, 0.5f,  0,1,0,   0.5f, 0.5f,-0.5f,  0,1,0,
+    // Bottom (-Y)
+    -0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f, 0.5f,  0,-1,0,
+    -0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f, 0.5f,  0,-1,0, -0.5f,-0.5f, 0.5f,  0,-1,0,
+    // Right (+X)
+     0.5f,-0.5f,-0.5f,  1,0,0,   0.5f, 0.5f,-0.5f,  1,0,0,   0.5f, 0.5f, 0.5f,  1,0,0,
+     0.5f,-0.5f,-0.5f,  1,0,0,   0.5f, 0.5f, 0.5f,  1,0,0,   0.5f,-0.5f, 0.5f,  1,0,0,
+    // Left (-X)
+    -0.5f,-0.5f,-0.5f, -1,0,0,  -0.5f,-0.5f, 0.5f, -1,0,0,  -0.5f, 0.5f, 0.5f, -1,0,0,
+    -0.5f,-0.5f,-0.5f, -1,0,0,  -0.5f, 0.5f, 0.5f, -1,0,0,  -0.5f, 0.5f,-0.5f, -1,0,0
 };
 
 static const char* VERTEX_SHADER =
     "#version 300 es\n"
     "layout(location = 0) in vec3 aPos;\n"
+    "layout(location = 1) in vec3 aNormal;\n"
     "uniform mat4 uMVP;\n"
-    "uniform mat4 uModel;\n"
-    "out vec3 vWorldPos;\n"
+    "out vec3 vLocalPos;\n"
+    "out vec3 vNormal;\n"
     "void main() {\n"
-    "    vWorldPos = vec3(uModel * vec4(aPos, 1.0));\n"
+    "    vLocalPos = aPos;\n"
+    "    vNormal = aNormal;\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
     "}\n";
 
 static const char* FRAGMENT_SHADER =
     "#version 300 es\n"
     "precision mediump float;\n"
-    "in vec3 vWorldPos;\n"
+    "in vec3 vLocalPos;\n"
+    "in vec3 vNormal;\n"
     "uniform vec3 uColor;\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
-    "    vec3 N = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));\n"
-    "    vec3 L = normalize(vec3(0.5, 1.0, 0.7));\n"
-    "    float diff = max(dot(N, L), 0.28);\n"
-    "    FragColor = vec4(uColor * diff, 1.0);\n"
+    "    // 3D Осветление според посоката на стената\n"
+    "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
+    "    float diff = max(dot(vNormal, L), 0.0) * 0.55 + 0.45;\n"
+    "    // Тъмни контури (Outlines) по ръбовете на всеки блок\n"
+    "    vec3 d = abs(vLocalPos);\n"
+    "    int edges = 0;\n"
+    "    if (d.x > 0.44) edges++;\n"
+    "    if (d.y > 0.44) edges++;\n"
+    "    if (d.z > 0.44) edges++;\n"
+    "    float edgeFactor = (edges >= 2) ? 0.35 : 1.0;\n"
+    "    FragColor = vec4(uColor * diff * edgeFactor, 1.0);\n"
     "}\n";
 
 static void mat4_identity(float* m) {
@@ -100,12 +115,10 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     glLinkProgram(shaderProgram);
 
     mvpLoc = glGetUniformLocation(shaderProgram, "uMVP");
-    modelLoc = glGetUniformLocation(shaderProgram, "uModel");
     colorLoc = glGetUniformLocation(shaderProgram, "uColor");
 
     glEnable(GL_DEPTH_TEST);
 
-    // Генериране на 3D решетка (Grid на пода)
     int idx = 0;
     for (int i = -8; i <= 8; i++) {
         gridVertices[idx++] = (float)i; gridVertices[idx++] = 0.0f; gridVertices[idx++] = -8.0f;
@@ -114,9 +127,7 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
         gridVertices[idx++] =  8.0f;    gridVertices[idx++] = 0.0f; gridVertices[idx++] = (float)i;
     }
 
-    // Стартов обект в центъра
-    entityPool[0] = { true, 0.0f, 0.5f, 0.0f, 1.0f, 0.2f, 0.6f, 1.0f };
-    for (int i = 1; i < MAX_ENTITIES; i++) entityPool[i].active = false;
+    for (int i = 0; i < MAX_ENTITIES; i++) entityPool[i].active = false;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -132,7 +143,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     if (shaderProgram == 0) return;
 
-    // Перспективна матрица (Projection)
     float P[16];
     mat4_identity(P);
     float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
@@ -143,7 +153,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     P[14] = -(2.0f * 100.0f * 0.1f) / (100.0f - 0.1f);
     P[15] = 0.0f;
 
-    // Камера (View Matrix) с орбитално завъртане
     float V[16], RotX[16], RotY[16], Trans[16];
     mat4_identity(Trans); Trans[14] = -camDist;
 
@@ -163,19 +172,18 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     glUseProgram(shaderProgram);
 
-    // 1. Рендиране на пода (Grid)
+    // 1. Grid
     float gridM[16], gridMVP[16];
     mat4_identity(gridM);
     mat4_mul(gridMVP, VP, gridM);
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, gridMVP);
-    glUniformMatrix4fv(modelLoc, 1, GL_FALSE, gridM);
-    glUniform3f(colorLoc, 0.35f, 0.4f, 0.45f);
+    glUniform3f(colorLoc, 0.35f, 0.45f, 0.55f);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
     glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
 
-    // 2. Рендиране на всички активни кубове от пула
+    // 2. Всички кубове с нормали и контури
     for (int i = 0; i < MAX_ENTITIES; i++) {
         if (!entityPool[i].active) continue;
 
@@ -193,14 +201,18 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
         mat4_mul(MVP, VP, M);
 
         glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, M);
         glUniform3f(colorLoc, entityPool[i].r, entityPool[i].g, entityPool[i].b);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, CUBE_VERTICES);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), CUBE_DATA);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &CUBE_DATA[3]);
+
         glDrawArrays(GL_TRIANGLES, 0, 36);
     }
 
     glDisableVertexAttribArray(0);
+    glDisableVertexAttribArray(1);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -214,8 +226,8 @@ Java_com_aigame_engine_NativeEngine_rotateCamera(JNIEnv*, jobject, jfloat dx, jf
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_zoomCamera(JNIEnv*, jobject, jfloat zoom) {
     camDist += zoom;
-    if (camDist < 2.5f) camDist = 2.5f;
-    if (camDist > 30.0f) camDist = 30.0f;
+    if (camDist < 3.0f) camDist = 3.0f;
+    if (camDist > 40.0f) camDist = 40.0f;
 }
 
 extern "C" JNIEXPORT void JNICALL

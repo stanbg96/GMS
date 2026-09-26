@@ -20,6 +20,34 @@
             android:id="@+id/gl_surface_view"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+
+        <!-- Бутони за Zoom (+ и -) -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_gravity="top|end"
+            android:layout_margin="12dp">
+
+            <Button
+                android:id="@+id/btn_zoom_in"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:text="+"
+                android:textSize="20sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#88000000"/>
+
+            <Button
+                android:id="@+id/btn_zoom_out"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginTop="8dp"
+                android:text="-"
+                android:textSize="20sp"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#88000000"/>
+        </LinearLayout>
     </FrameLayout>
 
     <androidx.constraintlayout.widget.ConstraintLayout

@@ -37,7 +37,7 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
-        // 360° Тъч управление на камерата с пръст
+        // 360° Тъч завъртане на камерата
         glSurfaceView.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -55,6 +55,14 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
+        // Zoom бутони
+        findViewById<Button>(R.id.btn_zoom_in).setOnClickListener {
+            NativeEngine.zoomCamera(-2.0f)
+        }
+        findViewById<Button>(R.id.btn_zoom_out).setOnClickListener {
+            NativeEngine.zoomCamera(2.0f)
+        }
+
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -67,7 +75,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: 3D Свят и Grid активни. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: Voxel 3D Engine е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
