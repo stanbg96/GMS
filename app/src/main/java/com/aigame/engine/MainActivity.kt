@@ -13,7 +13,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
@@ -68,7 +70,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS Spline Lofting Engine е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS 3D Asset Studio е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
@@ -90,14 +92,19 @@ class MainActivity : AppCompatActivity() {
                 addMessage(text, true)
                 chatInput.text.clear()
 
+                // Проверка дали потребителят иска кола
+                if (text.lowercase().contains("кола") || text.lowercase().contains("автомобил") || text.lowercase().contains("car")) {
+                    loadCarAsset()
+                    addMessage("Зареждам истински полигонален 3D автомобил...", false)
+                    return@setOnClickListener
+                }
+
                 addMessage("...", false)
                 val loadingIndex = messages.size - 1
 
                 lifecycleScope.launch {
                     val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                    val cleanReply = parseAndExecuteCommands(rawReply)
-
-                    messages[loadingIndex] = ChatMessage(cleanReply, false)
+                    messages[loadingIndex] = ChatMessage(rawReply, false)
                     adapter.notifyItemChanged(loadingIndex)
                     chatRecycler.scrollToPosition(loadingIndex)
                 }
@@ -105,39 +112,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun parseAndExecuteCommands(reply: String): String {
-        val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
-        val matches = regex.findAll(reply)
-
-        for (match in matches) {
-            val cmd = match.groupValues[1].uppercase()
-            val rawValue = match.groupValues[2]
-
-            try {
-                when (cmd) {
-                    "SUPERCAR", "CAR", "СУПЕРКАР", "КОЛА" -> {
-                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
-                        val rgb = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
-                        var r = 0.95f; var g = 0.12f; var b = 0.10f
-                        if (rgb.size >= 3) {
-                            r = rgb[0]; g = rgb[1]; b = rgb[2]
-                            if (r > 1.0f) r /= 255.0f
-                            if (g > 1.0f) g /= 255.0f
-                            if (b > 1.0f) b /= 255.0f
-                        }
-                        NativeEngine.generateSupercar(r, g, b)
-                    }
-                    "BG" -> {
-                        val rgb = rawValue.split(",").map { it.trim().toFloat() }
-                        if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
-                    }
+    private fun loadCarAsset() {
+        lifecycleScope.launch {
+            val objContent = withContext(Dispatchers.IO) {
+                try {
+                    assets.open("models/car.obj").bufferedReader().use { it.readText() }
+                } catch (e: Exception) {
+                    ""
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            }
+
+            if (objContent.isNotEmpty()) {
+                NativeEngine.loadObjString(objContent, 0.95f, 0.15f, 0.12f)
+            } else {
+                addMessage("Грешка: Не намерих файла car.obj в папката с ресурси!", false)
             }
         }
-
-        return reply.replace(regex, "").trim()
     }
 
     private fun showAiCloudDialog() {

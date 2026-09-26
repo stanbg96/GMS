@@ -13,6 +13,7 @@ object NativeEngine {
     external fun rotateCamera(dx: Float, dy: Float)
     external fun zoomCamera(zoom: Float)
 
-    // Параметричен синтез на гладък суперкар
-    external fun generateSupercar(r: Float, g: Float, b: Float)
+    // Зареждане на истински полигонални OBJ модели
+    external fun loadObjString(objData: String, r: Float, g: Float, b: Float)
+    external fun clearMesh()
 }

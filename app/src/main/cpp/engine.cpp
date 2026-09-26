@@ -2,14 +2,16 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 #include <vector>
+#include <string>
+#include <sstream>
 
 static float bgR = 0.55f, bgG = 0.68f, bgB = 0.82f;
 static float aspect = 1.0f;
 
 static float camYaw = 0.85f;
-static float camPitch = 0.40f;
-static float camDist = 13.0f;
-static float targetY = 0.7f;
+static float camPitch = 0.45f;
+static float camDist = 12.0f;
+static float targetY = 1.2f;
 
 struct Vertex {
     float x, y, z;
@@ -64,8 +66,8 @@ static const char* FRAGMENT_SHADER =
     "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
     "    vec3 V = normalize(uEyePos - vWorldPos);\n"
     "    vec3 H = normalize(L + V);\n"
-    "    float diff = max(dot(N, L), 0.0) * 0.60 + 0.40;\n"
-    "    float spec = pow(max(dot(N, H), 0.0), 36.0) * 0.55;\n"
+    "    float diff = max(dot(N, L), 0.0) * 0.65 + 0.35;\n"
+    "    float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.45;\n"
     "    vec3 finalCol = vColor * diff + vec3(spec);\n"
     "    FragColor = vec4(finalCol, 1.0);\n"
     "}\n";
@@ -112,124 +114,103 @@ static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float 
     m[15]= 1.0f;
 }
 
-// Добавяне на плавен четириъгълник от 2 триъгълника
-static void addSmoothQuad(const Vertex& v1, const Vertex& v2, const Vertex& v3, const Vertex& v4) {
-    meshVertices.push_back(v1);
-    meshVertices.push_back(v2);
-    meshVertices.push_back(v3);
-
-    meshVertices.push_back(v1);
-    meshVertices.push_back(v3);
-    meshVertices.push_back(v4);
-}
-
-// 1. Истинско 3D колело с джанта и гума
-static void addWheel(float cx, float cy, float cz, float radius, float width) {
-    const int segs = 16;
-    float hw = width * 0.5f;
-
-    for (int i = 0; i < segs; i++) {
-        float a0 = (float)i * 6.2831853f / (float)segs;
-        float a1 = (float)(i + 1) * 6.2831853f / (float)segs;
-        float y0 = cosf(a0) * radius, z0 = sinf(a0) * radius;
-        float y1 = cosf(a1) * radius, z1 = sinf(a1) * radius;
-
-        Vertex v1 = { cx - hw, cy + y0, cz + z0, 0.0f, cosf(a0), sinf(a0), 0.12f, 0.12f, 0.12f };
-        Vertex v2 = { cx + hw, cy + y0, cz + z0, 0.0f, cosf(a0), sinf(a0), 0.12f, 0.12f, 0.12f };
-        Vertex v3 = { cx + hw, cy + y1, cz + z1, 0.0f, cosf(a1), sinf(a1), 0.12f, 0.12f, 0.12f };
-        Vertex v4 = { cx - hw, cy + y1, cz + z1, 0.0f, cosf(a1), sinf(a1), 0.12f, 0.12f, 0.12f };
-        addSmoothQuad(v1, v2, v3, v4);
-
-        // Джанта
-        float rimR = radius * 0.65f;
-        Vertex r1 = { cx + hw * 1.01f, cy, cz, 1.0f, 0.0f, 0.0f, 0.85f, 0.88f, 0.90f };
-        Vertex r2 = { cx + hw * 1.01f, cy + cosf(a0)*rimR, cz + sinf(a0)*rimR, 1.0f, 0.0f, 0.0f, 0.85f, 0.88f, 0.90f };
-        Vertex r3 = { cx + hw * 1.01f, cy + cosf(a1)*rimR, cz + sinf(a1)*rimR, 1.0f, 0.0f, 0.0f, 0.85f, 0.88f, 0.90f };
-        meshVertices.push_back(r1); meshVertices.push_back(r2); meshVertices.push_back(r3);
-    }
-}
-
-// 2. ПАРАМЕТРИЧЕН ЛОФТИНГ НА ИСТИНСКИ СПОРТЕН СУПЕРКАР (Spline Lofting)
-static void generateProceduralSupercar(float r, float g, float b) {
+void parseObjString(const std::string& objData, float r, float g, float b) {
+    std::vector<float> tempPos;
+    std::vector<float> tempNorm;
     meshVertices.clear();
 
-    // 4 кръгли колела с джанти
-    addWheel(-1.18f, 0.42f,  1.40f, 0.44f, 0.32f);
-    addWheel( 1.18f, 0.42f,  1.40f, 0.44f, 0.32f);
-    addWheel(-1.22f, 0.45f, -1.35f, 0.47f, 0.36f);
-    addWheel( 1.22f, 0.45f, -1.35f, 0.47f, 0.36f);
+    std::stringstream ss(objData);
+    std::string line;
 
-    const int stepsZ = 20; // 20 секции по дължината
-    const int stepsS = 12; // 12 точки по всяка извивка
+    while (std::getline(ss, line)) {
+        if (line.size() < 2) continue;
+        if (line[0] == 'v' && line[1] == ' ') {
+            float x, y, z;
+            if (sscanf(line.c_str() + 2, "%f %f %f", &x, &y, &z) == 3) {
+                tempPos.push_back(x); tempPos.push_back(y); tempPos.push_back(z);
+            }
+        } else if (line[0] == 'v' && line[1] == 'n' && line[2] == ' ') {
+            float nx, ny, nz;
+            if (sscanf(line.c_str() + 3, "%f %f %f", &nx, &ny, &nz) == 3) {
+                tempNorm.push_back(nx); tempNorm.push_back(ny); tempNorm.push_back(nz);
+            }
+        } else if (line[0] == 'f' && line[1] == ' ') {
+            std::stringstream lineStream(line.substr(2));
+            std::string faceToken;
+            std::vector<int> faceV;
+            std::vector<int> faceN;
 
-    auto getProfile = [](float t, float& height, float& width) {
-        // Силует по дължината (Z): нос -> капак -> предно стъкло -> покрив -> заден спойлер
-        if (t < 0.20f) {
-            float k = t / 0.20f;
-            height = 0.30f + 0.38f * k * k; // Нисък остър нос
-            width = 0.85f + 0.30f * sinf(k * 3.14159f); // Предни калници
-        } else if (t < 0.42f) {
-            float k = (t - 0.20f) / 0.22f;
-            height = 0.68f + 0.68f * sinf(k * 1.57f); // Скосено аеродинамично стъкло
-            width = 1.05f - 0.10f * k; // Стесняване около кабината
-        } else if (t < 0.68f) {
-            float k = (t - 0.42f) / 0.26f;
-            height = 1.36f + 0.04f * sinf(k * 3.14159f); // Нисък спортен покрив
-            width = 0.95f + 0.30f * k; // Разширяване към задните калници
-        } else if (t < 0.88f) {
-            float k = (t - 0.68f) / 0.20f;
-            height = 1.36f - 0.55f * k; // Плавно спускане на задното стъкло (Fastback)
-            width = 1.25f; // Широка мускулеста задница
-        } else {
-            float k = (t - 0.88f) / 0.12f;
-            height = 0.81f + 0.22f * sinf(k * 1.57f); // Заден антикрил / спойлер
-            width = 1.15f;
-        }
-    };
-
-    float lengthZ = 4.8f;
-    float halfL = lengthZ * 0.5f;
-
-    for (int iz = 0; iz < stepsZ; iz++) {
-        float t0 = (float)iz / (float)stepsZ;
-        float t1 = (float)(iz + 1) / (float)stepsZ;
-
-        float z0 = halfL - t0 * lengthZ;
-        float z1 = halfL - t1 * lengthZ;
-
-        float h0, w0, h1, w1;
-        getProfile(t0, h0, w0);
-        getProfile(t1, h1, w1);
-
-        bool isGlass0 = (t0 >= 0.35f && t0 <= 0.72f);
-        bool isGlass1 = (t1 >= 0.35f && t1 <= 0.72f);
-
-        for (int is = 0; is < stepsS; is++) {
-            float s0 = -1.57079f + (float)is * 3.14159f / (float)stepsS;
-            float s1 = -1.57079f + (float)(is + 1) * 3.14159f / (float)stepsS;
-
-            float x00 = w0 * sinf(s0), y00 = 0.22f + (h0 - 0.22f) * cosf(s0);
-            float x01 = w0 * sinf(s1), y01 = 0.22f + (h0 - 0.22f) * cosf(s1);
-            float x10 = w1 * sinf(s0), y10 = 0.22f + (h1 - 0.22f) * cosf(s0);
-            float x11 = w1 * sinf(s1), y11 = 0.22f + (h1 - 0.22f) * cosf(s1);
-
-            float colR = r, colG = g, colB = b;
-            if ((isGlass0 || isGlass1) && (fabsf(s0) < 1.0f || fabsf(s1) < 1.0f)) {
-                colR = 0.22f; colG = 0.45f; colB = 0.65f; // Тонирано стъкло
+            while (lineStream >> faceToken) {
+                int vi = 0, ti = 0, ni = 0;
+                if (sscanf(faceToken.c_str(), "%d/%d/%d", &vi, &ti, &ni) == 3) {
+                    faceV.push_back(vi); faceN.push_back(ni);
+                } else if (sscanf(faceToken.c_str(), "%d//%d", &vi, &ni) == 2) {
+                    faceV.push_back(vi); faceN.push_back(ni);
+                } else if (sscanf(faceToken.c_str(), "%d/%d", &vi, &ti) == 2) {
+                    faceV.push_back(vi); faceN.push_back(0);
+                } else if (sscanf(faceToken.c_str(), "%d", &vi) == 1) {
+                    faceV.push_back(vi); faceN.push_back(0);
+                }
             }
 
-            // Изчисляване на гладки нормали за всяка точка
-            float nx00 = sinf(s0), ny00 = cosf(s0), nz00 = 0.1f;
-            float nx01 = sinf(s1), ny01 = cosf(s1), nz01 = 0.1f;
-            float nx10 = sinf(s0), ny10 = cosf(s0), nz10 = -0.1f;
-            float nx11 = sinf(s1), ny11 = cosf(s1), nz11 = -0.1f;
+            if (faceV.size() >= 3) {
+                for (size_t i = 1; i + 1 < faceV.size(); i++) {
+                    int idx[3] = { 0, (int)i, (int)i + 1 };
+                    for (int k = 0; k < 3; k++) {
+                        int vIdx = (faceV[idx[k]] - 1) * 3;
+                        if (vIdx >= 0 && vIdx + 2 < (int)tempPos.size()) {
+                            float nx = 0.0f, ny = 1.0f, nz = 0.0f;
+                            int nIdx = (faceN[idx[k]] - 1) * 3;
+                            if (faceN[idx[k]] > 0 && nIdx >= 0 && nIdx + 2 < (int)tempNorm.size()) {
+                                nx = tempNorm[nIdx]; ny = tempNorm[nIdx+1]; nz = tempNorm[nIdx+2];
+                            }
+                            meshVertices.push_back({ tempPos[vIdx], tempPos[vIdx+1], tempPos[vIdx+2], nx, ny, nz, r, g, b });
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-            Vertex v1 = { x00, y00, z0, nx00, ny00, nz00, colR, colG, colB };
-            Vertex v2 = { x01, y01, z0, nx01, ny01, nz01, colR, colG, colB };
-            Vertex v3 = { x11, y11, z1, nx11, ny11, nz11, colR, colG, colB };
-            Vertex v4 = { x10, y10, z1, nx10, ny10, nz10, colR, colG, colB };
+    // Автоматично центриране и поставяне точно на пода
+    if (!meshVertices.empty()) {
+        float minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, minZ = 1e9, maxZ = -1e9;
+        for (const auto& v : meshVertices) {
+            if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
+            if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
+            if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
+        }
 
-            addSmoothQuad(v1, v2, v3, v4);
+        float cx = (minX + maxX) * 0.5f;
+        float cy = minY; // Основата на гумите стъпва на пода
+        float cz = (minZ + maxZ) * 0.5f;
+        float maxDim = fmaxf(fmaxf(maxX - minX, maxY - minY), maxZ - minZ);
+        float scale = (maxDim > 0.001f) ? (5.5f / maxDim) : 1.0f;
+
+        for (auto& v : meshVertices) {
+            v.x = (v.x - cx) * scale;
+            v.y = (v.y - cy) * scale;
+            v.z = (v.z - cz) * scale;
+        }
+
+        // Автоматично изчисляване на гладки нормали при липса
+        for (size_t i = 0; i + 2 < meshVertices.size(); i += 3) {
+            if (meshVertices[i].nx == 0 && meshVertices[i].ny == 1 && meshVertices[i].nz == 0) {
+                float u1 = meshVertices[i+1].x - meshVertices[i].x;
+                float u2 = meshVertices[i+1].y - meshVertices[i].y;
+                float u3 = meshVertices[i+1].z - meshVertices[i].z;
+                float v1 = meshVertices[i+2].x - meshVertices[i].x;
+                float v2 = meshVertices[i+2].y - meshVertices[i].y;
+                float v3 = meshVertices[i+2].z - meshVertices[i].z;
+                float fnx = u2*v3 - u3*v2;
+                float fny = u3*v1 - u1*v3;
+                float fnz = u1*v2 - u2*v1;
+                float l = sqrtf(fnx*fnx + fny*fny + fnz*fnz);
+                if (l > 0.0001f) { fnx /= l; fny /= l; fnz /= l; }
+                meshVertices[i].nx = meshVertices[i+1].nx = meshVertices[i+2].nx = fnx;
+                meshVertices[i].ny = meshVertices[i+1].ny = meshVertices[i+2].ny = fny;
+                meshVertices[i].nz = meshVertices[i+1].nz = meshVertices[i+2].nz = fnz;
+            }
         }
     }
 }
@@ -315,8 +296,15 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_generateSupercar(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
-    generateProceduralSupercar(r, g, b);
+Java_com_aigame_engine_NativeEngine_loadObjString(JNIEnv* env, jobject, jstring objStr, jfloat r, jfloat g, jfloat b) {
+    const char* str = env->GetStringUTFChars(objStr, nullptr);
+    parseObjString(std::string(str), r, g, b);
+    env->ReleaseStringUTFChars(objStr, str);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_clearMesh(JNIEnv*, jobject) {
+    meshVertices.clear();
 }
 
 extern "C" JNIEXPORT void JNICALL
