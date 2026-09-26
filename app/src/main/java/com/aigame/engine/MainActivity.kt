@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.MotionEvent
-import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import android.opengl.GLSurfaceView
@@ -39,7 +38,6 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
-        // 360° Тъч завъртане на камерата
         glSurfaceView.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -57,15 +55,11 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        // Zoom бутони
         findViewById<Button>(R.id.btn_zoom_in).setOnClickListener { NativeEngine.zoomCamera(-2.0f) }
         findViewById<Button>(R.id.btn_zoom_out).setOnClickListener { NativeEngine.zoomCamera(2.0f) }
 
-        // Бутон за Физика (Play / Pause)
         btnTogglePhysics = findViewById(R.id.btn_toggle_physics)
-        btnTogglePhysics.setOnClickListener {
-            setPhysicsState(!isPhysicsOn)
-        }
+        btnTogglePhysics.setOnClickListener { setPhysicsState(!isPhysicsOn) }
 
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
@@ -79,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS Physics Engine е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS 3D Studio е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
@@ -121,40 +115,48 @@ class MainActivity : AppCompatActivity() {
         NativeEngine.setPhysicsEnabled(isPhysicsOn)
         if (isPhysicsOn) {
             btnTogglePhysics.text = "⏸️ Физика: ПУСНАТА"
-            btnTogglePhysics.setBackgroundColor(0xCC2E7D32.toInt()) // Зелено
+            btnTogglePhysics.setBackgroundColor(0xCC2E7D32.toInt())
         } else {
             btnTogglePhysics.text = "▶️ Физика: СТОП"
-            btnTogglePhysics.setBackgroundColor(0x88000000.toInt()) // Тъмно
+            btnTogglePhysics.setBackgroundColor(0x88000000.toInt())
         }
     }
 
     private fun parseAndExecuteCommands(reply: String): String {
-        val regex = Regex("\\[CMD:([A-Z_]+)(?::([^\\]]+))?\\]")
+        // Хваща команди на латиница (CMD:SPAWN) И на кирилица (СПАУН)
+        val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
 
         for (match in matches) {
-            val cmd = match.groupValues[1]
-            val value = match.groupValues[2]
+            val cmd = match.groupValues[1].uppercase()
+            val rawValue = match.groupValues[2]
 
             try {
                 when (cmd) {
-                    "CLEAR" -> NativeEngine.clearWorld()
+                    "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
                     "BG" -> {
-                        val rgb = value.split(",").map { it.trim().toFloat() }
+                        val rgb = rawValue.split(",").map { it.trim().toFloat() }
                         if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
                     }
-                    "SPAWN" -> {
-                        val p = value.split(",").map { it.trim().toFloat() }
-                        if (p.size == 7) NativeEngine.spawnCube(p[0], p[1], p[2], p[3], p[4], p[5], p[6])
+                    "SPAWN", "СПАУН" -> {
+                        // Извлича всички числа дори ако AI е написал "X=1, Y=2, R=255"
+                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
+                        val numbers = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
+                        if (numbers.size >= 7) {
+                            var r = numbers[4]
+                            var g = numbers[5]
+                            var b = numbers[6]
+                            if (r > 1.0f) r /= 255.0f
+                            if (g > 1.0f) g /= 255.0f
+                            if (b > 1.0f) b /= 255.0f
+                            NativeEngine.spawnCube(numbers[0], numbers[1], numbers[2], numbers[3], r, g, b)
+                        }
                     }
-                    "PHYSICS" -> {
-                        setPhysicsState(value.lowercase() == "on")
-                    }
-                    "GRAVITY" -> {
-                        NativeEngine.setGravity(value.trim().toFloat())
-                    }
-                    "EXPLODE" -> {
-                        val force = value.trim().toFloat()
+                    "PHYSICS", "ФИЗИКА" -> setPhysicsState(rawValue.lowercase().contains("on") || rawValue.lowercase().contains("да"))
+                    "GRAVITY", "ГРАВИТАЦИЯ" -> NativeEngine.setGravity(rawValue.trim().toFloat())
+                    "EXPLODE", "ВЗРИВ" -> {
+                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
+                        val force = numRegex.find(rawValue)?.value?.toFloat() ?: 12.0f
                         setPhysicsState(true)
                         NativeEngine.applyExplosion(force)
                     }
@@ -208,8 +210,8 @@ class MainActivity : AppCompatActivity() {
                     currentModels.clear()
                     currentModels.addAll(models)
                     spinnerModels.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, currentModels)
-                    tvModelLabel.visibility = View.VISIBLE
-                    spinnerModels.visibility = View.VISIBLE
+                    tvModelLabel.visibility = android.view.View.VISIBLE
+                    spinnerModels.visibility = android.view.View.VISIBLE
                     tvStatus.text = "Успех! Намерени ${models.size} модела."
                     tvStatus.setTextColor(0xFF00FF00.toInt())
                 } else {
@@ -222,7 +224,7 @@ class MainActivity : AppCompatActivity() {
         btnTest.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) {
+            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) {
                 spinnerModels.selectedItem.toString()
             } else ""
 
@@ -245,7 +247,7 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) {
+            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) {
                 spinnerModels.selectedItem.toString()
             } else {
                 "Не е избран"
