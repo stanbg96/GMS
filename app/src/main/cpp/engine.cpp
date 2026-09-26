@@ -3,28 +3,27 @@
 #include <cmath>
 #include <vector>
 
-static float bgR = 0.20f, bgG = 0.22f, bgB = 0.26f; // Тъмно модерен студиен цвят (Godot style)
+static float bgR = 0.20f, bgG = 0.22f, bgB = 0.26f;
 static float aspect = 1.0f;
 static int screenW = 1080, screenH = 1920;
 
-// Свободна FPS / Editor Камера
-static float camX = 0.0f, camY = 2.5f, camZ = 8.0f;
+// Камерата е отдалечена назад (Z=16) и високо (Y=6.5) за панорамен изглед
+static float camX = 0.0f, camY = 6.5f, camZ = 16.0f;
 static float camYaw = 0.0f;
-static float camPitch = -0.25f;
+static float camPitch = -0.38f;
 
-// Обекти в сцената
 struct EditorObject {
     bool active;
-    int type; // 0: Къща/Блок, 1: Кола/Болид, 2: Кула/Колона
+    int type;
     float x, y, z;
     float scale;
-    float rotY; // Завъртане в градуси
+    float rotY;
     float r, g, b;
 };
 
 #define MAX_OBJECTS 64
 static EditorObject sceneObjects[MAX_OBJECTS];
-static int selectedObjectIndex = -1; // -1 = нищо не е избрано
+static int selectedObjectIndex = -1;
 
 static GLuint shaderProgram = 0;
 static GLint mvpLoc = -1, colorLoc = -1, isSelectedLoc = -1;
@@ -70,7 +69,6 @@ static const char* FRAGMENT_SHADER =
     "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
     "    float diff = max(dot(N, L), 0.0) * 0.55 + 0.45;\n"
     "    vec3 col = uColor * diff;\n"
-    "    // Маркиране на избрания обект в златист контур/цвят\n"
     "    if (uIsSelected == 1) {\n"
     "        col = mix(col, vec3(1.0, 0.85, 0.2), 0.55);\n"
     "    }\n"
@@ -124,15 +122,12 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
         gridVertices[idx++] =  10.0f;   gridVertices[idx++] = 0.0f; gridVertices[idx++] = (float)i;
     }
 
-    // Стартови 3D обекти за редактора
     for (int i = 0; i < MAX_OBJECTS; i++) sceneObjects[i].active = false;
 
-    // Обект 1: Червена спортна кола
-    sceneObjects[0] = { true, 1, 0.0f, 0.5f, 0.0f, 1.2f, 0.0f, 0.9f, 0.2f, 0.2f };
-    // Обект 2: Синя сграда
-    sceneObjects[1] = { true, 0, -3.5f, 1.0f, -2.0f, 1.8f, 0.0f, 0.2f, 0.5f, 0.9f };
-    // Обект 3: Зелена кула
-    sceneObjects[2] = { true, 2,  3.5f, 1.5f, -1.0f, 1.0f, 0.0f, 0.2f, 0.8f, 0.3f };
+    // Подредени обекти с добра видимост отдалеч
+    sceneObjects[0] = { true, 1,  0.0f, 0.6f,  0.0f, 1.2f, 0.0f, 0.9f, 0.2f, 0.2f }; // Червена кола
+    sceneObjects[1] = { true, 0, -4.5f, 0.9f, -2.0f, 1.8f, 0.0f, 0.2f, 0.5f, 0.9f }; // Синя къща
+    sceneObjects[2] = { true, 2,  4.5f, 1.2f, -1.0f, 1.2f, 0.0f, 0.2f, 0.8f, 0.3f }; // Зелена кула
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -150,7 +145,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     if (shaderProgram == 0) return;
 
-    // Перспективна матрица
     float P[16];
     mat4_identity(P);
     float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
@@ -161,7 +155,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     P[14] = -(2.0f * 100.0f * 0.1f) / (100.0f - 0.1f);
     P[15] = 0.0f;
 
-    // View матрица за свободна FPS камера
     float cP = cosf(camPitch), sP = sinf(camPitch);
     float cY = cosf(camYaw),   sY = sinf(camYaw);
 
@@ -184,7 +177,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     glUseProgram(shaderProgram);
 
-    // 1. Grid (Координатна мрежа на редактора)
+    // Grid
     float gridM[16], gridMVP[16];
     mat4_identity(gridM);
     mat4_mul(gridMVP, VP, gridM);
@@ -196,7 +189,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
     glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
 
-    // 2. Рендиране на 3D обектите в редактора
+    // Обекти
     glEnableVertexAttribArray(1);
     for (int i = 0; i < MAX_OBJECTS; i++) {
         if (!sceneObjects[i].active) continue;
@@ -230,18 +223,14 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glDisableVertexAttribArray(1);
 }
 
-// ДВИЖЕНИЕ НА КАМЕРАТА (чрез Джойстик)
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_moveCamera(JNIEnv*, jobject, jfloat forwardInput, jfloat strafeInput) {
     float cY = cosf(camYaw), sY = sinf(camYaw);
-    float speed = 0.18f;
-
-    // Движение спрямо посоката на погледа
+    float speed = 0.22f;
     camX += (sY * forwardInput + cY * strafeInput) * speed;
     camZ += (-cY * forwardInput + sY * strafeInput) * speed;
 }
 
-// ЗАВЪРТАНЕ НА ПОГЛЕДА (чрез Touch Drag)
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_rotateLook(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     camYaw += dx;
@@ -250,7 +239,6 @@ Java_com_aigame_engine_NativeEngine_rotateLook(JNIEnv*, jobject, jfloat dx, jflo
     if (camPitch < -1.3f) camPitch = -1.3f;
 }
 
-// RAYCASTING: Клик върху обект за селекция
 extern "C" JNIEXPORT jint JNICALL
 Java_com_aigame_engine_NativeEngine_pickObject(JNIEnv*, jobject, jfloat tapX, jfloat tapY) {
     if (screenW <= 0 || screenH <= 0) return -1;
@@ -266,14 +254,12 @@ Java_com_aigame_engine_NativeEngine_pickObject(JNIEnv*, jobject, jfloat tapX, jf
     float rX = cY, rY = 0.0f, rZ = sY;
     float uX = -sP * sY, uY = cP, uZ = sP * cY;
 
-    // Вектор на лъча от камерата в пространството
     float rayX = fX + rX * (ndcX * tanHalf * aspect) + uX * (ndcY * tanHalf);
     float rayY = fY + rY * (ndcX * tanHalf * aspect) + uY * (ndcY * tanHalf);
     float rayZ = fZ + rZ * (ndcX * tanHalf * aspect) + uZ * (ndcY * tanHalf);
     float len = sqrtf(rayX*rayX + rayY*rayY + rayZ*rayZ);
     rayX /= len; rayY /= len; rayZ /= len;
 
-    // Търсене на най-близкия обект, пресечен от лъча
     int closestIdx = -1;
     float minT = 1e9f;
 
@@ -285,10 +271,10 @@ Java_com_aigame_engine_NativeEngine_pickObject(JNIEnv*, jobject, jfloat tapX, jf
         float oz = sceneObjects[i].z - camZ;
 
         float dot = ox * rayX + oy * rayY + oz * rayZ;
-        if (dot < 0.0f) continue; // Зад камерата
+        if (dot < 0.0f) continue;
 
         float perpDistSq = (ox*ox + oy*oy + oz*oz) - (dot * dot);
-        float radius = sceneObjects[i].scale * 0.75f;
+        float radius = sceneObjects[i].scale * 0.85f;
 
         if (perpDistSq <= (radius * radius)) {
             if (dot < minT) {
@@ -302,7 +288,6 @@ Java_com_aigame_engine_NativeEngine_pickObject(JNIEnv*, jobject, jfloat tapX, jf
     return selectedObjectIndex;
 }
 
-// ОПЕРАЦИИ ВЪРХУ ИЗБРАНИЯ ОБЕКТ
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_deleteSelected(JNIEnv*, jobject) {
     if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
@@ -317,9 +302,9 @@ Java_com_aigame_engine_NativeEngine_duplicateSelected(JNIEnv*, jobject) {
     for (int i = 0; i < MAX_OBJECTS; i++) {
         if (!sceneObjects[i].active) {
             sceneObjects[i] = sceneObjects[selectedObjectIndex];
-            sceneObjects[i].x += 1.2f;
-            sceneObjects[i].z += 1.2f;
-            selectedObjectIndex = i; // Маркира новото копие
+            sceneObjects[i].x += 1.5f;
+            sceneObjects[i].z += 1.5f;
+            selectedObjectIndex = i;
             break;
         }
     }
@@ -330,7 +315,7 @@ Java_com_aigame_engine_NativeEngine_scaleSelected(JNIEnv*, jobject, jfloat facto
     if (selectedObjectIndex >= 0 && selectedObjectIndex < MAX_OBJECTS) {
         sceneObjects[selectedObjectIndex].scale *= factor;
         if (sceneObjects[selectedObjectIndex].scale < 0.2f) sceneObjects[selectedObjectIndex].scale = 0.2f;
-        if (sceneObjects[selectedObjectIndex].scale > 8.0f) sceneObjects[selectedObjectIndex].scale = 8.0f;
+        if (sceneObjects[selectedObjectIndex].scale > 10.0f) sceneObjects[selectedObjectIndex].scale = 10.0f;
     }
 }
 
@@ -353,9 +338,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_spawnNewObject(JNIEnv*, jobject) {
     for (int i = 0; i < MAX_OBJECTS; i++) {
         if (!sceneObjects[i].active) {
-            // Поставя нов обект точно пред камерата на земята
             float fX = sinf(camYaw), fZ = -cosf(camYaw);
-            sceneObjects[i] = { true, 0, camX + fX * 4.0f, 0.7f, camZ + fZ * 4.0f, 1.2f, 0.0f, 0.9f, 0.5f, 0.1f };
+            sceneObjects[i] = { true, 0, camX + fX * 6.0f, 0.7f, camZ + fZ * 6.0f, 1.4f, 0.0f, 0.95f, 0.65f, 0.15f };
             selectedObjectIndex = i;
             break;
         }
