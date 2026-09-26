@@ -12,15 +12,10 @@ object NativeEngine {
     external fun setBackgroundColor(r: Float, g: Float, b: Float)
     external fun rotateCamera(dx: Float, dy: Float)
     external fun zoomCamera(zoom: Float)
-    external fun clearWorld()
 
-    external fun setPhysicsEnabled(enable: Boolean)
-    external fun setGravity(g: Float)
-    external fun applyExplosion(force: Float)
-
-    // Добавяне на свободен 3D обект с размери (SX,SY,SZ) и наклон (RX,RY,RZ)
-    external fun spawnObject(x: Float, y: Float, z: Float,
-                            sx: Float, sy: Float, sz: Float,
-                            rx: Float, ry: Float, rz: Float,
-                            r: Float, g: Float, b: Float)
+    // Полигонални 3D примитиви
+    external fun clearMesh()
+    external fun addBox(x: Float, y: Float, z: Float, sx: Float, sy: Float, sz: Float, r: Float, g: Float, b: Float)
+    external fun addCylinder(x: Float, y: Float, z: Float, radius: Float, width: Float, r: Float, g: Float, b: Float)
+    external fun addWedge(x: Float, y: Float, z: Float, sx: Float, sy: Float, sz: Float, r: Float, g: Float, b: Float)
 }

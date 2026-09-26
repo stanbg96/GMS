@@ -24,8 +24,6 @@ class MainActivity : AppCompatActivity() {
 
     private var prevTouchX = 0f
     private var prevTouchY = 0f
-    private var isPhysicsOn = false
-    private lateinit var btnTogglePhysics: Button
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,9 +56,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_zoom_in).setOnClickListener { NativeEngine.zoomCamera(-2.0f) }
         findViewById<Button>(R.id.btn_zoom_out).setOnClickListener { NativeEngine.zoomCamera(2.0f) }
 
-        btnTogglePhysics = findViewById(R.id.btn_toggle_physics)
-        btnTogglePhysics.setOnClickListener { setPhysicsState(!isPhysicsOn) }
-
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -73,7 +68,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS Procedural Engine е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS HD Polygon Engine е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
@@ -110,18 +105,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setPhysicsState(enable: Boolean) {
-        isPhysicsOn = enable
-        NativeEngine.setPhysicsEnabled(isPhysicsOn)
-        if (isPhysicsOn) {
-            btnTogglePhysics.text = "⏸️ Физика: ПУСНАТА"
-            btnTogglePhysics.setBackgroundColor(0xCC2E7D32.toInt())
-        } else {
-            btnTogglePhysics.text = "▶️ Физика: СТОП"
-            btnTogglePhysics.setBackgroundColor(0x88000000.toInt())
-        }
-    }
-
     private fun parseAndExecuteCommands(reply: String): String {
         val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
@@ -132,34 +115,34 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 when (cmd) {
-                    "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
+                    "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearMesh()
+                    "CYL", "ЦИЛИНДЪР" -> {
+                        val n = Regex("[-+]?\\d*\\.?\\d+").findAll(rawValue).map { it.value.toFloat() }.toList()
+                        if (n.size >= 8) {
+                            var r = n[5]; var g = n[6]; var b = n[7]
+                            if (r > 1.0f) r /= 255f; if (g > 1.0f) g /= 255f; if (b > 1.0f) b /= 255f
+                            NativeEngine.addCylinder(n[0], n[1], n[2], n[3], n[4], r, g, b)
+                        }
+                    }
+                    "WDG", "СКОСЯВАНЕ", "ПОКРИВ" -> {
+                        val n = Regex("[-+]?\\d*\\.?\\d+").findAll(rawValue).map { it.value.toFloat() }.toList()
+                        if (n.size >= 9) {
+                            var r = n[6]; var g = n[7]; var b = n[8]
+                            if (r > 1.0f) r /= 255f; if (g > 1.0f) g /= 255f; if (b > 1.0f) b /= 255f
+                            NativeEngine.addWedge(n[0], n[1], n[2], n[3], n[4], n[5], r, g, b)
+                        }
+                    }
+                    "BOX", "ПАНЕЛ" -> {
+                        val n = Regex("[-+]?\\d*\\.?\\d+").findAll(rawValue).map { it.value.toFloat() }.toList()
+                        if (n.size >= 9) {
+                            var r = n[6]; var g = n[7]; var b = n[8]
+                            if (r > 1.0f) r /= 255f; if (g > 1.0f) g /= 255f; if (b > 1.0f) b /= 255f
+                            NativeEngine.addBox(n[0], n[1], n[2], n[3], n[4], n[5], r, g, b)
+                        }
+                    }
                     "BG" -> {
                         val rgb = rawValue.split(",").map { it.trim().toFloat() }
                         if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
-                    }
-                    "OBJ", "ОБЕКТ", "SPAWN" -> {
-                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
-                        val n = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
-
-                        if (n.size >= 12) {
-                            // 12 параметъра: X,Y,Z, SX,SY,SZ, RX,RY,RZ, R,G,B
-                            var r = n[9]; var g = n[10]; var b = n[11]
-                            if (r > 1.0f) r /= 255.0f; if (g > 1.0f) g /= 255.0f; if (b > 1.0f) b /= 255.0f
-                            NativeEngine.spawnObject(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], r, g, b)
-                        } else if (n.size >= 9) {
-                            // 9 параметъра: X,Y,Z, SX,SY,SZ, R,G,B (без завъртане)
-                            var r = n[6]; var g = n[7]; var b = n[8]
-                            if (r > 1.0f) r /= 255.0f; if (g > 1.0f) g /= 255.0f; if (b > 1.0f) b /= 255.0f
-                            NativeEngine.spawnObject(n[0], n[1], n[2], n[3], n[4], n[5], 0.0f, 0.0f, 0.0f, r, g, b)
-                        }
-                    }
-                    "PHYSICS", "ФИЗИКА" -> setPhysicsState(rawValue.lowercase().contains("on") || rawValue.lowercase().contains("да"))
-                    "GRAVITY", "ГРАВИТАЦИЯ" -> NativeEngine.setGravity(rawValue.trim().toFloat())
-                    "SCATTER", "EXPLODE", "ВЗРИВ", "РАЗПРЪСНИ" -> {
-                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
-                        val force = numRegex.find(rawValue)?.value?.toFloat() ?: 12.0f
-                        setPhysicsState(true)
-                        NativeEngine.applyExplosion(force)
                     }
                 }
             } catch (e: Exception) {

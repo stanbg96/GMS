@@ -2,32 +2,27 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 
-static float bgR = 0.52f, bgG = 0.65f, bgB = 0.80f;
+static float bgR = 0.55f, bgG = 0.68f, bgB = 0.82f;
 static float aspect = 1.0f;
 
 static float camYaw = 0.85f;
 static float camPitch = 0.45f;
 static float camDist = 14.0f;
-static float targetY = 1.0f;
+static float targetY = 0.8f;
 
-static bool physicsEnabled = false;
-static float gravityY = -9.81f;
-
-// Обект със собствени размери (SX, SY, SZ) и 3D завъртане (RX, RY, RZ)
-struct Entity {
-    bool active;
+struct Vertex {
     float x, y, z;
-    float vx, vy, vz;
-    float sx, sy, sz; // Дължина, височина, ширина
-    float rx, ry, rz; // Наклон в градуси
+    float nx, ny, nz;
     float r, g, b;
 };
 
-#define MAX_ENTITIES 128
-static Entity entityPool[MAX_ENTITIES];
+// Буфер за до 12,000 триъгълни върха за фини 3D детайли
+#define MAX_VERTICES 12000
+static Vertex meshBuffer[MAX_VERTICES];
+static int vertexCount = 0;
 
 static GLuint shaderProgram = 0;
-static GLint mvpLoc = -1, colorLoc = -1;
+static GLint mvpLoc = -1, colorLoc = -1, eyePosLoc = -1;
 
 #define GRID_LINES 34
 static float gridVertices[GRID_LINES * 2 * 3];
@@ -42,51 +37,40 @@ static const float AXIS_VERTICES[] = {
      0.0f,  0.01f,-15.0f,   0.0f,  0.01f, 15.0f
 };
 
-static const float CUBE_DATA[] = {
-    -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,
-    -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,  -0.5f, 0.5f, 0.5f,  0,0,1,
-    -0.5f,-0.5f,-0.5f,  0,0,-1, -0.5f, 0.5f,-0.5f,  0,0,-1,  0.5f, 0.5f,-0.5f,  0,0,-1,
-    -0.5f,-0.5f,-0.5f,  0,0,-1,  0.5f, 0.5f,-0.5f,  0,0,-1,  0.5f,-0.5f,-0.5f,  0,0,-1,
-    -0.5f, 0.5f,-0.5f,  0,1,0,  -0.5f, 0.5f, 0.5f,  0,1,0,   0.5f, 0.5f, 0.5f,  0,1,0,
-    -0.5f, 0.5f,-0.5f,  0,1,0,   0.5f, 0.5f, 0.5f,  0,1,0,   0.5f, 0.5f,-0.5f,  0,1,0,
-    -0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f, 0.5f,  0,-1,0,
-    -0.5f,-0.5f,-0.5f,  0,-1,0,  0.5f,-0.5f, 0.5f,  0,-1,0, -0.5f,-0.5f, 0.5f,  0,-1,0,
-     0.5f,-0.5f,-0.5f,  1,0,0,   0.5f, 0.5f,-0.5f,  1,0,0,   0.5f, 0.5f, 0.5f,  1,0,0,
-     0.5f,-0.5f,-0.5f,  1,0,0,   0.5f, 0.5f, 0.5f,  1,0,0,   0.5f,-0.5f, 0.5f,  1,0,0,
-    -0.5f,-0.5f,-0.5f, -1,0,0,  -0.5f,-0.5f, 0.5f, -1,0,0,  -0.5f, 0.5f, 0.5f, -1,0,0,
-    -0.5f,-0.5f,-0.5f, -1,0,0,  -0.5f, 0.5f, 0.5f, -1,0,0,  -0.5f, 0.5f,-0.5f, -1,0,0
-};
-
+// Шейдър с чисто, гладко осветление без ръбове от кубчета
 static const char* VERTEX_SHADER =
     "#version 300 es\n"
     "layout(location = 0) in vec3 aPos;\n"
     "layout(location = 1) in vec3 aNormal;\n"
+    "layout(location = 2) in vec3 aColor;\n"
     "uniform mat4 uMVP;\n"
-    "out vec3 vLocalPos;\n"
+    "out vec3 vWorldPos;\n"
     "out vec3 vNormal;\n"
+    "out vec3 vColor;\n"
     "void main() {\n"
-    "    vLocalPos = aPos;\n"
+    "    vWorldPos = aPos;\n"
     "    vNormal = aNormal;\n"
+    "    vColor = aColor;\n"
     "    gl_Position = uMVP * vec4(aPos, 1.0);\n"
     "}\n";
 
 static const char* FRAGMENT_SHADER =
     "#version 300 es\n"
     "precision mediump float;\n"
-    "in vec3 vLocalPos;\n"
+    "in vec3 vWorldPos;\n"
     "in vec3 vNormal;\n"
-    "uniform vec3 uColor;\n"
+    "in vec3 vColor;\n"
+    "uniform vec3 uEyePos;\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
+    "    vec3 N = normalize(vNormal);\n"
     "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
-    "    float diff = max(dot(vNormal, L), 0.0) * 0.5 + 0.5;\n"
-    "    vec3 d = abs(vLocalPos);\n"
-    "    int edges = 0;\n"
-    "    if (d.x > 0.44) edges++;\n"
-    "    if (d.y > 0.44) edges++;\n"
-    "    if (d.z > 0.44) edges++;\n"
-    "    float edgeFactor = (edges >= 2) ? 0.35 : 1.0;\n"
-    "    FragColor = vec4(uColor * diff * edgeFactor, 1.0);\n"
+    "    vec3 V = normalize(uEyePos - vWorldPos);\n"
+    "    vec3 H = normalize(L + V);\n"
+    "    float diff = max(dot(N, L), 0.0) * 0.65 + 0.35;\n"
+    "    float spec = pow(max(dot(N, H), 0.0), 32.0) * 0.45;\n"
+    "    vec3 finalCol = vColor * diff + vec3(spec);\n"
+    "    FragColor = vec4(finalCol, 1.0);\n"
     "}\n";
 
 static void mat4_identity(float* m) {
@@ -105,38 +89,6 @@ static void mat4_mul(float* out, const float* a, const float* b) {
         }
     }
     for (int i = 0; i < 16; i++) out[i] = temp[i];
-}
-
-// 3D Трансформация: позиция, несиметричен мащаб (sx, sy, sz) и 3D Euler ротация (rx, ry, rz)
-static void mat4_transform(float* out, float x, float y, float z,
-                           float sx, float sy, float sz,
-                           float rx_deg, float ry_deg, float rz_deg) {
-    mat4_identity(out);
-    out[12] = x; out[13] = y; out[14] = z;
-
-    float rX = rx_deg * 0.0174532925f;
-    float rY = ry_deg * 0.0174532925f;
-    float rZ = rz_deg * 0.0174532925f;
-
-    float cX = cosf(rX), sX = sinf(rX);
-    float cY = cosf(rY), sY = sinf(rY);
-    float cZ = cosf(rZ), sZ = sinf(rZ);
-
-    float r00 = cY * cZ + sY * sX * sZ;
-    float r01 = -cY * sZ + sY * sX * cZ;
-    float r02 = sY * cX;
-
-    float r10 = cX * sZ;
-    float r11 = cX * cZ;
-    float r12 = -sX;
-
-    float r20 = -sY * cZ + cY * sX * sZ;
-    float r21 = sY * sZ + cY * sX * cZ;
-    float r22 = cY * cX;
-
-    out[0] = r00 * sx; out[1] = r10 * sx; out[2] = r20 * sx;
-    out[4] = r01 * sy; out[5] = r11 * sy; out[6] = r21 * sy;
-    out[8] = r02 * sz; out[9] = r12 * sz; out[10] = r22 * sz;
 }
 
 static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float ty, float tz, float ux, float uy, float uz) {
@@ -163,6 +115,95 @@ static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float 
     m[15]= 1.0f;
 }
 
+static void addVertex(float x, float y, float z, float nx, float ny, float nz, float r, float g, float b) {
+    if (vertexCount < MAX_VERTICES) {
+        meshBuffer[vertexCount++] = { x, y, z, nx, ny, nz, r, g, b };
+    }
+}
+
+// 1. Гладко заоблен цилиндър (за истински кръгли гуми и колони)
+static void addCylinderX(float cx, float cy, float cz, float radius, float width, float r, float g, float b) {
+    const int segs = 16;
+    float hw = width * 0.5f;
+
+    for (int i = 0; i < segs; i++) {
+        float a0 = (float)i * 6.2831853f / (float)segs;
+        float a1 = (float)(i + 1) * 6.2831853f / (float)segs;
+        float y0 = cosf(a0) * radius, z0 = sinf(a0) * radius;
+        float y1 = cosf(a1) * radius, z1 = sinf(a1) * radius;
+
+        // Външна заоблена повърхност (гума с гладки нормали)
+        addVertex(cx - hw, cy + y0, cz + z0,  0.0f, cosf(a0), sinf(a0),  r, g, b);
+        addVertex(cx + hw, cy + y0, cz + z0,  0.0f, cosf(a0), sinf(a0),  r, g, b);
+        addVertex(cx + hw, cy + y1, cz + z1,  0.0f, cosf(a1), sinf(a1),  r, g, b);
+
+        addVertex(cx - hw, cy + y0, cz + z0,  0.0f, cosf(a0), sinf(a0),  r, g, b);
+        addVertex(cx + hw, cy + y1, cz + z1,  0.0f, cosf(a1), sinf(a1),  r, g, b);
+        addVertex(cx - hw, cy + y1, cz + z1,  0.0f, cosf(a1), sinf(a1),  r, g, b);
+
+        // Джанти (капаци от двете страни)
+        addVertex(cx + hw, cy, cz,           1.0f, 0.0f, 0.0f,  r*0.8f, g*0.8f, b*0.8f);
+        addVertex(cx + hw, cy + y0, cz + z0, 1.0f, 0.0f, 0.0f,  r*0.8f, g*0.8f, b*0.8f);
+        addVertex(cx + hw, cy + y1, cz + z1, 1.0f, 0.0f, 0.0f,  r*0.8f, g*0.8f, b*0.8f);
+
+        addVertex(cx - hw, cy, cz,          -1.0f, 0.0f, 0.0f,  r*0.8f, g*0.8f, b*0.8f);
+        addVertex(cx - hw, cy + y1, cz + z1,-1.0f, 0.0f, 0.0f,  r*0.8f, g*0.8f, b*0.8f);
+        addVertex(cx - hw, cy + y0, cz + z0,-1.0f, 0.0f, 0.0f,  r*0.8f, g*0.8f, b*0.8f);
+    }
+}
+
+// 2. Скосена триъгълна призма (за наклонени покриви и аеродинамични предни стъкла)
+static void addWedge(float cx, float cy, float cz, float sx, float sy, float sz, float r, float g, float b) {
+    float hx = sx * 0.5f, hy = sy * 0.5f, hz = sz * 0.5f;
+
+    // Наклонен скат (покрив / предно стъкло)
+    float nx = 0.0f, ny = hz, nz = hy;
+    float len = sqrtf(ny * ny + nz * nz);
+    ny /= len; nz /= len;
+
+    addVertex(cx - hx, cy - hy, cz + hz,  nx, ny, nz,  r, g, b);
+    addVertex(cx + hx, cy - hy, cz + hz,  nx, ny, nz,  r, g, b);
+    addVertex(cx + hx, cy + hy, cz - hz,  nx, ny, nz,  r, g, b);
+
+    addVertex(cx - hx, cy - hy, cz + hz,  nx, ny, nz,  r, g, b);
+    addVertex(cx + hx, cy + hy, cz - hz,  nx, ny, nz,  r, g, b);
+    addVertex(cx - hx, cy + hy, cz - hz,  nx, ny, nz,  r, g, b);
+
+    // Вертикална задна стена
+    addVertex(cx - hx, cy - hy, cz - hz,  0, 0, -1,  r*0.9f, g*0.9f, b*0.9f);
+    addVertex(cx - hx, cy + hy, cz - hz,  0, 0, -1,  r*0.9f, g*0.9f, b*0.9f);
+    addVertex(cx + hx, cy + hy, cz - hz,  0, 0, -1,  r*0.9f, g*0.9f, b*0.9f);
+
+    addVertex(cx - hx, cy - hy, cz - hz,  0, 0, -1,  r*0.9f, g*0.9f, b*0.9f);
+    addVertex(cx + hx, cy + hy, cz - hz,  0, 0, -1,  r*0.9f, g*0.9f, b*0.9f);
+    addVertex(cx + hx, cy - hy, cz - hz,  0, 0, -1,  r*0.9f, g*0.9f, b*0.9f);
+}
+
+// 3. Гладък 3D правоъгълен панел (за купе, стени, греди)
+static void addBox(float cx, float cy, float cz, float sx, float sy, float sz, float r, float g, float b) {
+    float hx = sx * 0.5f, hy = sy * 0.5f, hz = sz * 0.5f;
+
+    // 6 стени с чисти полигонални нормали
+    // Front (+Z)
+    addVertex(cx-hx, cy-hy, cz+hz, 0,0,1, r,g,b); addVertex(cx+hx, cy-hy, cz+hz, 0,0,1, r,g,b); addVertex(cx+hx, cy+hy, cz+hz, 0,0,1, r,g,b);
+    addVertex(cx-hx, cy-hy, cz+hz, 0,0,1, r,g,b); addVertex(cx+hx, cy+hy, cz+hz, 0,0,1, r,g,b); addVertex(cx-hx, cy+hy, cz+hz, 0,0,1, r,g,b);
+    // Back (-Z)
+    addVertex(cx-hx, cy-hy, cz-hz, 0,0,-1, r*0.8f,g*0.8f,b*0.8f); addVertex(cx-hx, cy+hy, cz-hz, 0,0,-1, r*0.8f,g*0.8f,b*0.8f); addVertex(cx+hx, cy+hy, cz-hz, 0,0,-1, r*0.8f,g*0.8f,b*0.8f);
+    addVertex(cx-hx, cy-hy, cz-hz, 0,0,-1, r*0.8f,g*0.8f,b*0.8f); addVertex(cx+hx, cy+hy, cz-hz, 0,0,-1, r*0.8f,g*0.8f,b*0.8f); addVertex(cx+hx, cy-hy, cz-hz, 0,0,-1, r*0.8f,g*0.8f,b*0.8f);
+    // Top (+Y)
+    addVertex(cx-hx, cy+hy, cz-hz, 0,1,0, r*1.1f,g*1.1f,b*1.1f); addVertex(cx-hx, cy+hy, cz+hz, 0,1,0, r*1.1f,g*1.1f,b*1.1f); addVertex(cx+hx, cy+hy, cz+hz, 0,1,0, r*1.1f,g*1.1f,b*1.1f);
+    addVertex(cx-hx, cy+hy, cz-hz, 0,1,0, r*1.1f,g*1.1f,b*1.1f); addVertex(cx+hx, cy+hy, cz+hz, 0,1,0, r*1.1f,g*1.1f,b*1.1f); addVertex(cx+hx, cy+hy, cz-hz, 0,1,0, r*1.1f,g*1.1f,b*1.1f);
+    // Bottom (-Y)
+    addVertex(cx-hx, cy-hy, cz-hz, 0,-1,0, r*0.5f,g*0.5f,b*0.5f); addVertex(cx+hx, cy-hy, cz-hz, 0,-1,0, r*0.5f,g*0.5f,b*0.5f); addVertex(cx+hx, cy-hy, cz+hz, 0,-1,0, r*0.5f,g*0.5f,b*0.5f);
+    addVertex(cx-hx, cy-hy, cz-hz, 0,-1,0, r*0.5f,g*0.5f,b*0.5f); addVertex(cx+hx, cy-hy, cz+hz, 0,-1,0, r*0.5f,g*0.5f,b*0.5f); addVertex(cx-hx, cy-hy, cz+hz, 0,-1,0, r*0.5f,g*0.5f,b*0.5f);
+    // Right (+X)
+    addVertex(cx+hx, cy-hy, cz-hz, 1,0,0, r*0.9f,g*0.9f,b*0.9f); addVertex(cx+hx, cy+hy, cz-hz, 1,0,0, r*0.9f,g*0.9f,b*0.9f); addVertex(cx+hx, cy+hy, cz+hz, 1,0,0, r*0.9f,g*0.9f,b*0.9f);
+    addVertex(cx+hx, cy-hy, cz-hz, 1,0,0, r*0.9f,g*0.9f,b*0.9f); addVertex(cx+hx, cy+hy, cz+hz, 1,0,0, r*0.9f,g*0.9f,b*0.9f); addVertex(cx+hx, cy-hy, cz+hz, 1,0,0, r*0.9f,g*0.9f,b*0.9f);
+    // Left (-X)
+    addVertex(cx-hx, cy-hy, cz-hz, -1,0,0, r*0.7f,g*0.7f,b*0.7f); addVertex(cx-hx, cy-hy, cz+hz, -1,0,0, r*0.7f,g*0.7f,b*0.7f); addVertex(cx-hx, cy+hy, cz+hz, -1,0,0, r*0.7f,g*0.7f,b*0.7f);
+    addVertex(cx-hx, cy-hy, cz-hz, -1,0,0, r*0.7f,g*0.7f,b*0.7f); addVertex(cx-hx, cy+hy, cz+hz, -1,0,0, r*0.7f,g*0.7f,b*0.7f); addVertex(cx-hx, cy+hy, cz-hz, -1,0,0, r*0.7f,g*0.7f,b*0.7f);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -179,7 +220,7 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     glLinkProgram(shaderProgram);
 
     mvpLoc = glGetUniformLocation(shaderProgram, "uMVP");
-    colorLoc = glGetUniformLocation(shaderProgram, "uColor");
+    eyePosLoc = glGetUniformLocation(shaderProgram, "uEyePos");
 
     glEnable(GL_DEPTH_TEST);
 
@@ -191,7 +232,7 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
         gridVertices[idx++] =  8.0f;    gridVertices[idx++] = 0.005f; gridVertices[idx++] = (float)i;
     }
 
-    for (int i = 0; i < MAX_ENTITIES; i++) entityPool[i].active = false;
+    vertexCount = 0;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -202,26 +243,6 @@ Java_com_aigame_engine_NativeEngine_onSurfaceChanged(JNIEnv*, jobject, jint w, j
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
-    if (physicsEnabled) {
-        const float dt = 0.016f;
-        for (int i = 0; i < MAX_ENTITIES; i++) {
-            if (!entityPool[i].active) continue;
-            entityPool[i].vy += gravityY * dt;
-            entityPool[i].x += entityPool[i].vx * dt;
-            entityPool[i].y += entityPool[i].vy * dt;
-            entityPool[i].z += entityPool[i].vz * dt;
-
-            float floorY = entityPool[i].sy * 0.5f;
-            if (entityPool[i].y < floorY) {
-                entityPool[i].y = floorY;
-                entityPool[i].vy = -entityPool[i].vy * 0.3f;
-                if (fabsf(entityPool[i].vy) < 0.2f) entityPool[i].vy = 0.0f;
-                entityPool[i].vx *= 0.85f;
-                entityPool[i].vz *= 0.85f;
-            }
-        }
-    }
-
     glClearColor(bgR, bgG, bgB, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -246,95 +267,45 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     mat4_mul(VP, P, V);
 
     glUseProgram(shaderProgram);
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, VP);
+    glUniform3f(eyePosLoc, eyeX, eyeY, eyeZ);
 
-    // Studio Floor
-    float floorM[16], floorMVP[16];
-    mat4_identity(floorM);
-    mat4_mul(floorMVP, VP, floorM);
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, floorMVP);
-    glUniform3f(colorLoc, 0.22f, 0.25f, 0.30f);
+    // 1. Изчертаване на целия сглобен 3D модел в ЕДИН draw call (Хардуерно оптимизирано)
+    if (vertexCount > 0) {
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshBuffer[0].x);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshBuffer[0].nx);
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshBuffer[0].r);
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), FLOOR_VERTICES);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &FLOOR_VERTICES[3]);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+        glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 
-    // Grid lines
-    glUniform3f(colorLoc, 0.35f, 0.40f, 0.48f);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
-    glDisableVertexAttribArray(1);
-    glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
-
-    // Axes
-    glUniform3f(colorLoc, 0.9f, 0.25f, 0.25f);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, &AXIS_VERTICES[0]);
-    glDrawArrays(GL_LINES, 0, 2);
-
-    glUniform3f(colorLoc, 0.25f, 0.5f, 0.95f);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, &AXIS_VERTICES[6]);
-    glDrawArrays(GL_LINES, 0, 2);
-
-    // Рендиране на процедурните детайли
-    glEnableVertexAttribArray(1);
-    for (int i = 0; i < MAX_ENTITIES; i++) {
-        if (!entityPool[i].active) continue;
-
-        float M[16], MVP[16];
-        mat4_transform(M, entityPool[i].x, entityPool[i].y, entityPool[i].z,
-                          entityPool[i].sx, entityPool[i].sy, entityPool[i].sz,
-                          entityPool[i].rx, entityPool[i].ry, entityPool[i].rz);
-
-        mat4_mul(MVP, VP, M);
-
-        glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
-        glUniform3f(colorLoc, entityPool[i].r, entityPool[i].g, entityPool[i].b);
-
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), CUBE_DATA);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &CUBE_DATA[3]);
-        glDrawArrays(GL_TRIANGLES, 0, 36);
-    }
-
-    glDisableVertexAttribArray(0);
-    glDisableVertexAttribArray(1);
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_spawnObject(JNIEnv*, jobject,
-        jfloat x, jfloat y, jfloat z,
-        jfloat sx, jfloat sy, jfloat sz,
-        jfloat rx, jfloat ry, jfloat rz,
-        jfloat r, jfloat g, jfloat b) {
-    for (int i = 0; i < MAX_ENTITIES; i++) {
-        if (!entityPool[i].active) {
-            entityPool[i] = { true, x, y, z, 0.0f, 0.0f, 0.0f, sx, sy, sz, rx, ry, rz, r, g, b };
-            break;
-        }
+        glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
+        glDisableVertexAttribArray(2);
     }
 }
 
+// JNI команди за истински 3D примитиви
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setPhysicsEnabled(JNIEnv*, jobject, jboolean enable) {
-    physicsEnabled = enable;
+Java_com_aigame_engine_NativeEngine_clearMesh(JNIEnv*, jobject) {
+    vertexCount = 0;
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setGravity(JNIEnv*, jobject, jfloat g) {
-    gravityY = g;
+Java_com_aigame_engine_NativeEngine_addBox(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat sx, jfloat sy, jfloat sz, jfloat r, jfloat g, jfloat b) {
+    addBox(x, y, z, sx, sy, sz, r, g, b);
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_applyExplosion(JNIEnv*, jobject, jfloat force) {
-    physicsEnabled = true;
-    for (int i = 0; i < MAX_ENTITIES; i++) {
-        if (!entityPool[i].active) continue;
-        float dirX = entityPool[i].x + ((float)(rand() % 100) / 100.0f - 0.5f);
-        float dirZ = entityPool[i].z + ((float)(rand() % 100) / 100.0f - 0.5f);
-        float len = sqrtf(dirX * dirX + dirZ * dirZ) + 0.1f;
-        entityPool[i].vx = (dirX / len) * force;
-        entityPool[i].vy = force * 0.8f + ((float)(rand() % 100) / 100.0f) * force * 0.4f;
-        entityPool[i].vz = (dirZ / len) * force;
-    }
+Java_com_aigame_engine_NativeEngine_addCylinder(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat radius, jfloat width, jfloat r, jfloat g, jfloat b) {
+    addCylinderX(x, y, z, radius, width, r, g, b);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_addWedge(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat sx, jfloat sy, jfloat sz, jfloat r, jfloat g, jfloat b) {
+    addWedge(x, y, z, sx, sy, sz, r, g, b);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -350,11 +321,6 @@ Java_com_aigame_engine_NativeEngine_zoomCamera(JNIEnv*, jobject, jfloat zoom) {
     camDist += zoom;
     if (camDist < 3.0f) camDist = 3.0f;
     if (camDist > 40.0f) camDist = 40.0f;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_clearWorld(JNIEnv*, jobject) {
-    for (int i = 0; i < MAX_ENTITIES; i++) entityPool[i].active = false;
 }
 
 extern "C" JNIEXPORT void JNICALL
