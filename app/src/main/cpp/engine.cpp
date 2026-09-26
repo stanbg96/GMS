@@ -1,25 +1,25 @@
 #include <jni.h>
 #include <GLES3/gl3.h>
 #include <cmath>
-#include <cstring>
-#include <cstdlib>
 
 static float bgR = 0.52f, bgG = 0.65f, bgB = 0.80f;
 static float aspect = 1.0f;
 
-static float camYaw = 0.8f;
-static float camPitch = 0.55f;
+static float camYaw = 0.85f;
+static float camPitch = 0.45f;
 static float camDist = 14.0f;
 static float targetY = 1.0f;
 
 static bool physicsEnabled = false;
 static float gravityY = -9.81f;
 
+// Обект със собствени размери (SX, SY, SZ) и 3D завъртане (RX, RY, RZ)
 struct Entity {
     bool active;
     float x, y, z;
     float vx, vy, vz;
-    float scale;
+    float sx, sy, sz; // Дължина, височина, ширина
+    float rx, ry, rz; // Наклон в градуси
     float r, g, b;
 };
 
@@ -107,6 +107,38 @@ static void mat4_mul(float* out, const float* a, const float* b) {
     for (int i = 0; i < 16; i++) out[i] = temp[i];
 }
 
+// 3D Трансформация: позиция, несиметричен мащаб (sx, sy, sz) и 3D Euler ротация (rx, ry, rz)
+static void mat4_transform(float* out, float x, float y, float z,
+                           float sx, float sy, float sz,
+                           float rx_deg, float ry_deg, float rz_deg) {
+    mat4_identity(out);
+    out[12] = x; out[13] = y; out[14] = z;
+
+    float rX = rx_deg * 0.0174532925f;
+    float rY = ry_deg * 0.0174532925f;
+    float rZ = rz_deg * 0.0174532925f;
+
+    float cX = cosf(rX), sX = sinf(rX);
+    float cY = cosf(rY), sY = sinf(rY);
+    float cZ = cosf(rZ), sZ = sinf(rZ);
+
+    float r00 = cY * cZ + sY * sX * sZ;
+    float r01 = -cY * sZ + sY * sX * cZ;
+    float r02 = sY * cX;
+
+    float r10 = cX * sZ;
+    float r11 = cX * cZ;
+    float r12 = -sX;
+
+    float r20 = -sY * cZ + cY * sX * sZ;
+    float r21 = sY * sZ + cY * sX * cZ;
+    float r22 = cY * cX;
+
+    out[0] = r00 * sx; out[1] = r10 * sx; out[2] = r20 * sx;
+    out[4] = r01 * sy; out[5] = r11 * sy; out[6] = r21 * sy;
+    out[8] = r02 * sz; out[9] = r12 * sz; out[10] = r22 * sz;
+}
+
 static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float ty, float tz, float ux, float uy, float uz) {
     float fx = tx - ex, fy = ty - ey, fz = tz - ez;
     float rlf = 1.0f / sqrtf(fx*fx + fy*fy + fz*fz);
@@ -129,15 +161,6 @@ static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float 
     m[13]= -(ux2*ex + uy2*ey + uz2*ez);
     m[14]= (fx*ex + fy*ey + fz*ez);
     m[15]= 1.0f;
-}
-
-static void spawnCubeInternal(float x, float y, float z, float scale, float r, float g, float b) {
-    for (int i = 0; i < MAX_ENTITIES; i++) {
-        if (!entityPool[i].active) {
-            entityPool[i] = { true, x, y, z, 0.0f, 0.0f, 0.0f, scale, r, g, b };
-            break;
-        }
-    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -188,7 +211,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
             entityPool[i].y += entityPool[i].vy * dt;
             entityPool[i].z += entityPool[i].vz * dt;
 
-            float floorY = entityPool[i].scale * 0.5f;
+            float floorY = entityPool[i].sy * 0.5f;
             if (entityPool[i].y < floorY) {
                 entityPool[i].y = floorY;
                 entityPool[i].vy = -entityPool[i].vy * 0.3f;
@@ -224,7 +247,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     glUseProgram(shaderProgram);
 
-    // 1. Studio Floor
+    // Studio Floor
     float floorM[16], floorMVP[16];
     mat4_identity(floorM);
     mat4_mul(floorMVP, VP, floorM);
@@ -237,13 +260,13 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &FLOOR_VERTICES[3]);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    // 2. Grid Lines
+    // Grid lines
     glUniform3f(colorLoc, 0.35f, 0.40f, 0.48f);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
     glDisableVertexAttribArray(1);
     glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
 
-    // 3. Axes
+    // Axes
     glUniform3f(colorLoc, 0.9f, 0.25f, 0.25f);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, &AXIS_VERTICES[0]);
     glDrawArrays(GL_LINES, 0, 2);
@@ -252,22 +275,16 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, &AXIS_VERTICES[6]);
     glDrawArrays(GL_LINES, 0, 2);
 
-    // 4. Cubes
+    // Рендиране на процедурните детайли
     glEnableVertexAttribArray(1);
     for (int i = 0; i < MAX_ENTITIES; i++) {
         if (!entityPool[i].active) continue;
 
-        float M[16], S[16], T[16], MVP[16];
-        mat4_identity(T);
-        T[12] = entityPool[i].x;
-        T[13] = entityPool[i].y;
-        T[14] = entityPool[i].z;
+        float M[16], MVP[16];
+        mat4_transform(M, entityPool[i].x, entityPool[i].y, entityPool[i].z,
+                          entityPool[i].sx, entityPool[i].sy, entityPool[i].sz,
+                          entityPool[i].rx, entityPool[i].ry, entityPool[i].rz);
 
-        mat4_identity(S);
-        float sc = entityPool[i].scale;
-        S[0] = sc; S[5] = sc; S[10] = sc;
-
-        mat4_mul(M, T, S);
         mat4_mul(MVP, VP, M);
 
         glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
@@ -282,53 +299,18 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glDisableVertexAttribArray(1);
 }
 
-// ПРОЦЕДУРНО СТРОЕНЕ НА ОБЕКТИ (Procedural Builders)
 extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_buildShape(JNIEnv* env, jobject, jstring type, jfloat r, jfloat g, jfloat b) {
-    const char* str = env->GetStringUTFChars(type, nullptr);
-
-    if (strcmp(str, "PYRAMID") == 0) {
-        // Истинска 3D пирамида (3 нива: 3x3, 2x2, 1x1 = 14 куба)
-        for (int x = -1; x <= 1; x++)
-            for (int z = -1; z <= 1; z++)
-                spawnCubeInternal(x * 1.0f, 0.5f, z * 1.0f, 0.98f, r, g, b);
-        for (int x = 0; x <= 1; x++)
-            for (int z = 0; z <= 1; z++)
-                spawnCubeInternal(x * 1.0f - 0.5f, 1.5f, z * 1.0f - 0.5f, 0.98f, r, g, b);
-        spawnCubeInternal(0.0f, 2.5f, 0.0f, 0.98f, r * 1.1f, g * 1.1f, b * 1.1f);
-    }
-    else if (strcmp(str, "CAR") == 0) {
-        // Истинска 3D кола: 4 черни колела + шаси + стъклен покрив
-        spawnCubeInternal(-0.9f, 0.35f, -0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
-        spawnCubeInternal( 0.9f, 0.35f, -0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
-        spawnCubeInternal(-0.9f, 0.35f,  0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
-        spawnCubeInternal( 0.9f, 0.35f,  0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
-        // Купе
-        for (int x = -1; x <= 1; x++)
-            for (int z = -1; z <= 1; z++)
-                spawnCubeInternal(x * 0.8f, 0.9f, z * 0.8f, 0.85f, r, g, b);
-        // Кабина със стъкла
-        spawnCubeInternal(0.0f, 1.7f, 0.0f, 1.1f, 0.3f, 0.7f, 0.95f);
-    }
-    else if (strcmp(str, "HOUSE") == 0) {
-        // Къща със стени и червен покрив
-        for (int x = -1; x <= 0; x++) {
-            for (int z = -1; z <= 0; z++) {
-                spawnCubeInternal(x * 1.0f + 0.5f, 0.5f, z * 1.0f + 0.5f, 0.98f, r, g, b);
-                spawnCubeInternal(x * 1.0f + 0.5f, 1.5f, z * 1.0f + 0.5f, 0.98f, r, g, b);
-            }
+Java_com_aigame_engine_NativeEngine_spawnObject(JNIEnv*, jobject,
+        jfloat x, jfloat y, jfloat z,
+        jfloat sx, jfloat sy, jfloat sz,
+        jfloat rx, jfloat ry, jfloat rz,
+        jfloat r, jfloat g, jfloat b) {
+    for (int i = 0; i < MAX_ENTITIES; i++) {
+        if (!entityPool[i].active) {
+            entityPool[i] = { true, x, y, z, 0.0f, 0.0f, 0.0f, sx, sy, sz, rx, ry, rz, r, g, b };
+            break;
         }
-        spawnCubeInternal(0.0f, 2.5f, 0.0f, 1.4f, 0.85f, 0.2f, 0.2f);
     }
-    else if (strcmp(str, "TOWER") == 0) {
-        // Кула от 5 етажа
-        for (int y = 0; y < 5; y++)
-            spawnCubeInternal(0.0f, y * 1.0f + 0.5f, 0.0f, 0.98f, r, g, b);
-        spawnCubeInternal(-0.4f, 5.3f, 0.0f, 0.45f, r * 1.2f, g * 1.2f, b * 1.2f);
-        spawnCubeInternal( 0.4f, 5.3f, 0.0f, 0.45f, r * 1.2f, g * 1.2f, b * 1.2f);
-    }
-
-    env->ReleaseStringUTFChars(type, str);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -373,11 +355,6 @@ Java_com_aigame_engine_NativeEngine_zoomCamera(JNIEnv*, jobject, jfloat zoom) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_clearWorld(JNIEnv*, jobject) {
     for (int i = 0; i < MAX_ENTITIES; i++) entityPool[i].active = false;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_spawnCube(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat scale, jfloat r, jfloat g, jfloat b) {
-    spawnCubeInternal(x, y, z, scale, r, g, b);
 }
 
 extern "C" JNIEXPORT void JNICALL

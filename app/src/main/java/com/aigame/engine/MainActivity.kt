@@ -73,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: GMS 3D Studio е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS Procedural Engine е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
@@ -133,30 +133,24 @@ class MainActivity : AppCompatActivity() {
             try {
                 when (cmd) {
                     "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
-                    "BUILD" -> {
-                        // Формат: BUILD:TYPE:R,G,B (напр. BUILD:CAR:0.9,0.2,0.1)
-                        val parts = rawValue.split(":")
-                        val type = parts[0].uppercase()
-                        var r = 0.8f; var g = 0.8f; var b = 0.8f
-                        if (parts.size > 1) {
-                            val rgb = parts[1].split(",").map { it.trim().toFloat() }
-                            if (rgb.size >= 3) { r = rgb[0]; g = rgb[1]; b = rgb[2] }
-                        }
-                        NativeEngine.buildShape(type, r, g, b)
-                    }
                     "BG" -> {
                         val rgb = rawValue.split(",").map { it.trim().toFloat() }
                         if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
                     }
-                    "SPAWN", "СПАУН" -> {
+                    "OBJ", "ОБЕКТ", "SPAWN" -> {
                         val numRegex = Regex("[-+]?\\d*\\.?\\d+")
-                        val numbers = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
-                        if (numbers.size >= 7) {
-                            var r = numbers[4]; var g = numbers[5]; var b = numbers[6]
-                            if (r > 1.0f) r /= 255.0f
-                            if (g > 1.0f) g /= 255.0f
-                            if (b > 1.0f) b /= 255.0f
-                            NativeEngine.spawnCube(numbers[0], numbers[1], numbers[2], numbers[3], r, g, b)
+                        val n = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
+
+                        if (n.size >= 12) {
+                            // 12 параметъра: X,Y,Z, SX,SY,SZ, RX,RY,RZ, R,G,B
+                            var r = n[9]; var g = n[10]; var b = n[11]
+                            if (r > 1.0f) r /= 255.0f; if (g > 1.0f) g /= 255.0f; if (b > 1.0f) b /= 255.0f
+                            NativeEngine.spawnObject(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], r, g, b)
+                        } else if (n.size >= 9) {
+                            // 9 параметъра: X,Y,Z, SX,SY,SZ, R,G,B (без завъртане)
+                            var r = n[6]; var g = n[7]; var b = n[8]
+                            if (r > 1.0f) r /= 255.0f; if (g > 1.0f) g /= 255.0f; if (b > 1.0f) b /= 255.0f
+                            NativeEngine.spawnObject(n[0], n[1], n[2], n[3], n[4], n[5], 0.0f, 0.0f, 0.0f, r, g, b)
                         }
                     }
                     "PHYSICS", "ФИЗИКА" -> setPhysicsState(rawValue.lowercase().contains("on") || rawValue.lowercase().contains("да"))
