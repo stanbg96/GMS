@@ -1,11 +1,12 @@
 #include <jni.h>
 #include <GLES3/gl3.h>
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
 
-static float bgR = 0.52f, bgG = 0.65f, bgB = 0.80f; // Приятно небе
+static float bgR = 0.52f, bgG = 0.65f, bgB = 0.80f;
 static float aspect = 1.0f;
 
-// Истинска 3D LookAt Камера
 static float camYaw = 0.8f;
 static float camPitch = 0.55f;
 static float camDist = 14.0f;
@@ -31,16 +32,14 @@ static GLint mvpLoc = -1, colorLoc = -1;
 #define GRID_LINES 34
 static float gridVertices[GRID_LINES * 2 * 3];
 
-// Плътен под (Solid Ground Floor)
 static const float FLOOR_VERTICES[] = {
     -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,
     -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,  -20.0f, 0.0f,  20.0f,  0,1,0
 };
 
-// 3D Оси: X (Червена) и Z (Синя)
 static const float AXIS_VERTICES[] = {
-    -15.0f, 0.01f, 0.0f,   15.0f, 0.01f, 0.0f, // X ос
-     0.0f,  0.01f,-15.0f,   0.0f,  0.01f, 15.0f  // Z ос
+    -15.0f, 0.01f, 0.0f,   15.0f, 0.01f, 0.0f,
+     0.0f,  0.01f,-15.0f,   0.0f,  0.01f, 15.0f
 };
 
 static const float CUBE_DATA[] = {
@@ -108,7 +107,6 @@ static void mat4_mul(float* out, const float* a, const float* b) {
     for (int i = 0; i < 16; i++) out[i] = temp[i];
 }
 
-// Стандартна матрица LookAt за истинска 3D перспектива
 static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float ty, float tz, float ux, float uy, float uz) {
     float fx = tx - ex, fy = ty - ey, fz = tz - ez;
     float rlf = 1.0f / sqrtf(fx*fx + fy*fy + fz*fz);
@@ -131,6 +129,15 @@ static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float 
     m[13]= -(ux2*ex + uy2*ey + uz2*ez);
     m[14]= (fx*ex + fy*ey + fz*ez);
     m[15]= 1.0f;
+}
+
+static void spawnCubeInternal(float x, float y, float z, float scale, float r, float g, float b) {
+    for (int i = 0; i < MAX_ENTITIES; i++) {
+        if (!entityPool[i].active) {
+            entityPool[i] = { true, x, y, z, 0.0f, 0.0f, 0.0f, scale, r, g, b };
+            break;
+        }
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -197,7 +204,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     if (shaderProgram == 0) return;
 
-    // Перспектива
     float P[16];
     mat4_identity(P);
     float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
@@ -208,7 +214,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     P[14] = -(2.0f * 100.0f * 0.1f) / (100.0f - 0.1f);
     P[15] = 0.0f;
 
-    // Сферична LookAt Камера: орбита около центъра
     float eyeX = camDist * cosf(camPitch) * sinf(camYaw);
     float eyeY = camDist * sinf(camPitch) + targetY;
     float eyeZ = camDist * cosf(camPitch) * cosf(camYaw);
@@ -219,12 +224,12 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     glUseProgram(shaderProgram);
 
-    // 1. Плътен 3D под (Studio Ground)
+    // 1. Studio Floor
     float floorM[16], floorMVP[16];
     mat4_identity(floorM);
     mat4_mul(floorMVP, VP, floorM);
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, floorMVP);
-    glUniform3f(colorLoc, 0.22f, 0.25f, 0.30f); // Модерен сив под
+    glUniform3f(colorLoc, 0.22f, 0.25f, 0.30f);
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), FLOOR_VERTICES);
@@ -232,13 +237,13 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &FLOOR_VERTICES[3]);
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
-    // 2. Линии на мрежата върху пода
+    // 2. Grid Lines
     glUniform3f(colorLoc, 0.35f, 0.40f, 0.48f);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
     glDisableVertexAttribArray(1);
     glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
 
-    // 3. Червена ос X и Синя ос Z (като в Blender/Unity)
+    // 3. Axes
     glUniform3f(colorLoc, 0.9f, 0.25f, 0.25f);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, &AXIS_VERTICES[0]);
     glDrawArrays(GL_LINES, 0, 2);
@@ -247,7 +252,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, &AXIS_VERTICES[6]);
     glDrawArrays(GL_LINES, 0, 2);
 
-    // 4. Всички 3D обекти
+    // 4. Cubes
     glEnableVertexAttribArray(1);
     for (int i = 0; i < MAX_ENTITIES; i++) {
         if (!entityPool[i].active) continue;
@@ -275,6 +280,55 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
+}
+
+// ПРОЦЕДУРНО СТРОЕНЕ НА ОБЕКТИ (Procedural Builders)
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_buildShape(JNIEnv* env, jobject, jstring type, jfloat r, jfloat g, jfloat b) {
+    const char* str = env->GetStringUTFChars(type, nullptr);
+
+    if (strcmp(str, "PYRAMID") == 0) {
+        // Истинска 3D пирамида (3 нива: 3x3, 2x2, 1x1 = 14 куба)
+        for (int x = -1; x <= 1; x++)
+            for (int z = -1; z <= 1; z++)
+                spawnCubeInternal(x * 1.0f, 0.5f, z * 1.0f, 0.98f, r, g, b);
+        for (int x = 0; x <= 1; x++)
+            for (int z = 0; z <= 1; z++)
+                spawnCubeInternal(x * 1.0f - 0.5f, 1.5f, z * 1.0f - 0.5f, 0.98f, r, g, b);
+        spawnCubeInternal(0.0f, 2.5f, 0.0f, 0.98f, r * 1.1f, g * 1.1f, b * 1.1f);
+    }
+    else if (strcmp(str, "CAR") == 0) {
+        // Истинска 3D кола: 4 черни колела + шаси + стъклен покрив
+        spawnCubeInternal(-0.9f, 0.35f, -0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
+        spawnCubeInternal( 0.9f, 0.35f, -0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
+        spawnCubeInternal(-0.9f, 0.35f,  0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
+        spawnCubeInternal( 0.9f, 0.35f,  0.8f, 0.65f, 0.15f, 0.15f, 0.15f);
+        // Купе
+        for (int x = -1; x <= 1; x++)
+            for (int z = -1; z <= 1; z++)
+                spawnCubeInternal(x * 0.8f, 0.9f, z * 0.8f, 0.85f, r, g, b);
+        // Кабина със стъкла
+        spawnCubeInternal(0.0f, 1.7f, 0.0f, 1.1f, 0.3f, 0.7f, 0.95f);
+    }
+    else if (strcmp(str, "HOUSE") == 0) {
+        // Къща със стени и червен покрив
+        for (int x = -1; x <= 0; x++) {
+            for (int z = -1; z <= 0; z++) {
+                spawnCubeInternal(x * 1.0f + 0.5f, 0.5f, z * 1.0f + 0.5f, 0.98f, r, g, b);
+                spawnCubeInternal(x * 1.0f + 0.5f, 1.5f, z * 1.0f + 0.5f, 0.98f, r, g, b);
+            }
+        }
+        spawnCubeInternal(0.0f, 2.5f, 0.0f, 1.4f, 0.85f, 0.2f, 0.2f);
+    }
+    else if (strcmp(str, "TOWER") == 0) {
+        // Кула от 5 етажа
+        for (int y = 0; y < 5; y++)
+            spawnCubeInternal(0.0f, y * 1.0f + 0.5f, 0.0f, 0.98f, r, g, b);
+        spawnCubeInternal(-0.4f, 5.3f, 0.0f, 0.45f, r * 1.2f, g * 1.2f, b * 1.2f);
+        spawnCubeInternal( 0.4f, 5.3f, 0.0f, 0.45f, r * 1.2f, g * 1.2f, b * 1.2f);
+    }
+
+    env->ReleaseStringUTFChars(type, str);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -323,12 +377,7 @@ Java_com_aigame_engine_NativeEngine_clearWorld(JNIEnv*, jobject) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_spawnCube(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat scale, jfloat r, jfloat g, jfloat b) {
-    for (int i = 0; i < MAX_ENTITIES; i++) {
-        if (!entityPool[i].active) {
-            entityPool[i] = { true, x, y, z, 0.0f, 0.0f, 0.0f, scale, r, g, b };
-            break;
-        }
-    }
+    spawnCubeInternal(x, y, z, scale, r, g, b);
 }
 
 extern "C" JNIEXPORT void JNICALL

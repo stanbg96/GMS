@@ -123,7 +123,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseAndExecuteCommands(reply: String): String {
-        // Хваща команди на латиница (CMD:SPAWN) И на кирилица (СПАУН)
         val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
 
@@ -134,18 +133,26 @@ class MainActivity : AppCompatActivity() {
             try {
                 when (cmd) {
                     "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
+                    "BUILD" -> {
+                        // Формат: BUILD:TYPE:R,G,B (напр. BUILD:CAR:0.9,0.2,0.1)
+                        val parts = rawValue.split(":")
+                        val type = parts[0].uppercase()
+                        var r = 0.8f; var g = 0.8f; var b = 0.8f
+                        if (parts.size > 1) {
+                            val rgb = parts[1].split(",").map { it.trim().toFloat() }
+                            if (rgb.size >= 3) { r = rgb[0]; g = rgb[1]; b = rgb[2] }
+                        }
+                        NativeEngine.buildShape(type, r, g, b)
+                    }
                     "BG" -> {
                         val rgb = rawValue.split(",").map { it.trim().toFloat() }
                         if (rgb.size == 3) NativeEngine.setBackgroundColor(rgb[0], rgb[1], rgb[2])
                     }
                     "SPAWN", "СПАУН" -> {
-                        // Извлича всички числа дори ако AI е написал "X=1, Y=2, R=255"
                         val numRegex = Regex("[-+]?\\d*\\.?\\d+")
                         val numbers = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
                         if (numbers.size >= 7) {
-                            var r = numbers[4]
-                            var g = numbers[5]
-                            var b = numbers[6]
+                            var r = numbers[4]; var g = numbers[5]; var b = numbers[6]
                             if (r > 1.0f) r /= 255.0f
                             if (g > 1.0f) g /= 255.0f
                             if (b > 1.0f) b /= 255.0f
@@ -154,7 +161,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     "PHYSICS", "ФИЗИКА" -> setPhysicsState(rawValue.lowercase().contains("on") || rawValue.lowercase().contains("да"))
                     "GRAVITY", "ГРАВИТАЦИЯ" -> NativeEngine.setGravity(rawValue.trim().toFloat())
-                    "EXPLODE", "ВЗРИВ" -> {
+                    "SCATTER", "EXPLODE", "ВЗРИВ", "РАЗПРЪСНИ" -> {
                         val numRegex = Regex("[-+]?\\d*\\.?\\d+")
                         val force = numRegex.find(rawValue)?.value?.toFloat() ?: 12.0f
                         setPhysicsState(true)

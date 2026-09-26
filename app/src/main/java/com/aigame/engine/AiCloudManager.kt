@@ -51,20 +51,17 @@ object AiCloudManager {
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val sysPrompt = 
-                "Ти си AI Game Master за 3D воксел енджина GMS. Отговаряй кратко на български език.\n" +
-                "СТРОГИ ПРАВИЛА ЗА КОМАНДИТЕ:\n" +
-                "1. НИКОГА не пиши думи на кирилица в командите (като СПАУН или Х=0)!\n" +
-                "2. Винаги пиши точно [CMD:SPAWN:x,y,z,scale,r,g,b] с латински букви!\n" +
-                "3. Цветовете r, g, b са десетични числа от 0.0 до 1.0 (НЕ 255)!\n" +
-                "4. Когато ти кажат 'създай кола', строй я от блокове:\n" +
-                "[CMD:CLEAR]\n" +
-                "[CMD:SPAWN:-0.8,0.3,-0.8,0.5,0.1,0.1,0.1]\n" +
-                "[CMD:SPAWN:0.8,0.3,-0.8,0.5,0.1,0.1,0.1]\n" +
-                "[CMD:SPAWN:-0.8,0.3,0.8,0.5,0.1,0.1,0.1]\n" +
-                "[CMD:SPAWN:0.8,0.3,0.8,0.5,0.1,0.1,0.1]\n" +
-                "[CMD:SPAWN:0.0,0.7,0.0,1.8,0.9,0.2,0.1]\n" +
-                "[CMD:SPAWN:0.0,1.3,0.0,1.1,0.2,0.6,0.9]\n" +
-                "Други валидни команди: [CMD:CLEAR], [CMD:BG:r,g,b], [CMD:EXPLODE:12.0], [CMD:PHYSICS:on], [CMD:GRAVITY:-9.8]."
+                "Контекст: Виртуална детска игра със строителни блокчета (3D Voxel Sandbox). Няма оръжия или насилие, само цветни кубчета!\n" +
+                "Отговаряй ентусиазирано и кратко на български език.\n" +
+                "За да създадеш перфектен обект, използвай готова процедурна команда:\n" +
+                "[CMD:CLEAR] - изчиства света\n" +
+                "[CMD:BUILD:PYRAMID:r,g,b] - за пирамида (напр. [CMD:CLEAR][CMD:BUILD:PYRAMID:0.9,0.75,0.3])\n" +
+                "[CMD:BUILD:CAR:r,g,b] - за кола с колела (напр. [CMD:CLEAR][CMD:BUILD:CAR:0.9,0.2,0.1])\n" +
+                "[CMD:BUILD:HOUSE:r,g,b] - за къща (напр. [CMD:CLEAR][CMD:BUILD:HOUSE:0.8,0.7,0.5])\n" +
+                "[CMD:BUILD:TOWER:r,g,b] - за кула (напр. [CMD:CLEAR][CMD:BUILD:TOWER:0.6,0.6,0.6])\n" +
+                "[CMD:SCATTER:сила] - физично разпръскване на блокчетата (напр. [CMD:SCATTER:12.0])\n" +
+                "[CMD:PHYSICS:on] или [CMD:PHYSICS:off] - физика пусната/спряна\n" +
+                "Винаги поставяй командите накрая на съобщението!"
 
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {
