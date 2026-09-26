@@ -25,6 +25,8 @@ class MainActivity : AppCompatActivity() {
 
     private var prevTouchX = 0f
     private var prevTouchY = 0f
+    private var isPhysicsOn = false
+    private lateinit var btnTogglePhysics: Button
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,11 +58,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Zoom бутони
-        findViewById<Button>(R.id.btn_zoom_in).setOnClickListener {
-            NativeEngine.zoomCamera(-2.0f)
-        }
-        findViewById<Button>(R.id.btn_zoom_out).setOnClickListener {
-            NativeEngine.zoomCamera(2.0f)
+        findViewById<Button>(R.id.btn_zoom_in).setOnClickListener { NativeEngine.zoomCamera(-2.0f) }
+        findViewById<Button>(R.id.btn_zoom_out).setOnClickListener { NativeEngine.zoomCamera(2.0f) }
+
+        // Бутон за Физика (Play / Pause)
+        btnTogglePhysics = findViewById(R.id.btn_toggle_physics)
+        btnTogglePhysics.setOnClickListener {
+            setPhysicsState(!isPhysicsOn)
         }
 
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
@@ -75,7 +79,7 @@ class MainActivity : AppCompatActivity() {
         val savedProvider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
         val savedModel = prefs.getString("ai_model", "") ?: ""
         if (savedModel.isNotEmpty()) {
-            addMessage("Система: Voxel 3D Engine е готов. AI: $savedProvider ($savedModel)", false)
+            addMessage("Система: GMS Physics Engine е готов. AI: $savedProvider ($savedModel)", false)
         } else {
             addMessage("Система: GMS Engine е готов. Натисни 'AI Cloud' за модел.", false)
         }
@@ -112,6 +116,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setPhysicsState(enable: Boolean) {
+        isPhysicsOn = enable
+        NativeEngine.setPhysicsEnabled(isPhysicsOn)
+        if (isPhysicsOn) {
+            btnTogglePhysics.text = "⏸️ Физика: ПУСНАТА"
+            btnTogglePhysics.setBackgroundColor(0xCC2E7D32.toInt()) // Зелено
+        } else {
+            btnTogglePhysics.text = "▶️ Физика: СТОП"
+            btnTogglePhysics.setBackgroundColor(0x88000000.toInt()) // Тъмно
+        }
+    }
+
     private fun parseAndExecuteCommands(reply: String): String {
         val regex = Regex("\\[CMD:([A-Z_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
@@ -129,9 +145,18 @@ class MainActivity : AppCompatActivity() {
                     }
                     "SPAWN" -> {
                         val p = value.split(",").map { it.trim().toFloat() }
-                        if (p.size == 7) {
-                            NativeEngine.spawnCube(p[0], p[1], p[2], p[3], p[4], p[5], p[6])
-                        }
+                        if (p.size == 7) NativeEngine.spawnCube(p[0], p[1], p[2], p[3], p[4], p[5], p[6])
+                    }
+                    "PHYSICS" -> {
+                        setPhysicsState(value.lowercase() == "on")
+                    }
+                    "GRAVITY" -> {
+                        NativeEngine.setGravity(value.trim().toFloat())
+                    }
+                    "EXPLODE" -> {
+                        val force = value.trim().toFloat()
+                        setPhysicsState(true)
+                        NativeEngine.applyExplosion(force)
                     }
                 }
             } catch (e: Exception) {

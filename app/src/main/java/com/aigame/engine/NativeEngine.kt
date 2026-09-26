@@ -14,4 +14,9 @@ object NativeEngine {
     external fun zoomCamera(zoom: Float)
     external fun spawnCube(x: Float, y: Float, z: Float, scale: Float, r: Float, g: Float, b: Float)
     external fun clearWorld()
+
+    // Физични функции
+    external fun setPhysicsEnabled(enable: Boolean)
+    external fun setGravity(g: Float)
+    external fun applyExplosion(force: Float)
 }

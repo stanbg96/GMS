@@ -2,16 +2,21 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 
-static float bgR = 0.45f, bgG = 0.7f, bgB = 0.95f; // Красиво небе по подразбиране
+static float bgR = 0.45f, bgG = 0.7f, bgB = 0.95f;
 static float aspect = 1.0f;
 
 static float camYaw = 0.7f;
 static float camPitch = 0.45f;
-static float camDist = 13.0f; // Отдалечена камера, за да се виждат цели сгради
+static float camDist = 13.0f;
+
+// ФИЗИЧНА СИСТЕМА (Physics Engine)
+static bool physicsEnabled = false;
+static float gravityY = -9.81f; // Земна гравитация
 
 struct Entity {
     bool active;
     float x, y, z;
+    float vx, vy, vz; // Скорости
     float scale;
     float r, g, b;
 };
@@ -25,7 +30,6 @@ static GLint mvpLoc = -1, colorLoc = -1;
 #define GRID_LINES 34
 static float gridVertices[GRID_LINES * 2 * 3];
 
-// 36 върха: Позиция (X,Y,Z) + Нормали (NX,NY,NZ)
 static const float CUBE_DATA[] = {
     // Front (+Z)
     -0.5f,-0.5f, 0.5f,  0,0,1,   0.5f,-0.5f, 0.5f,  0,0,1,   0.5f, 0.5f, 0.5f,  0,0,1,
@@ -68,10 +72,8 @@ static const char* FRAGMENT_SHADER =
     "uniform vec3 uColor;\n"
     "out vec4 FragColor;\n"
     "void main() {\n"
-    "    // 3D Осветление според посоката на стената\n"
     "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
     "    float diff = max(dot(vNormal, L), 0.0) * 0.55 + 0.45;\n"
-    "    // Тъмни контури (Outlines) по ръбовете на всеки блок\n"
     "    vec3 d = abs(vLocalPos);\n"
     "    int edges = 0;\n"
     "    if (d.x > 0.44) edges++;\n"
@@ -138,6 +140,55 @@ Java_com_aigame_engine_NativeEngine_onSurfaceChanged(JNIEnv*, jobject, jint w, j
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
+    // СИМУЛАЦИЯ НА ФИЗИКАТА (Fixed Time-step dt = 1/60s)
+    if (physicsEnabled) {
+        const float dt = 0.016f;
+        for (int i = 0; i < MAX_ENTITIES; i++) {
+            if (!entityPool[i].active) continue;
+
+            // 1. Прилагане на гравитация
+            entityPool[i].vy += gravityY * dt;
+
+            // 2. Движение
+            entityPool[i].x += entityPool[i].vx * dt;
+            entityPool[i].y += entityPool[i].vy * dt;
+            entityPool[i].z += entityPool[i].vz * dt;
+
+            // 3. Сблъсък с пода (Y = scale * 0.5)
+            float floorY = entityPool[i].scale * 0.5f;
+            if (entityPool[i].y < floorY) {
+                entityPool[i].y = floorY;
+                entityPool[i].vy = -entityPool[i].vy * 0.35f; // Отскок
+                if (fabsf(entityPool[i].vy) < 0.2f) entityPool[i].vy = 0.0f;
+                entityPool[i].vx *= 0.85f; // Триене в пода
+                entityPool[i].vz *= 0.85f;
+            }
+        }
+
+        // 4. Сблъсък между самите кубове (AABB кутия с кутия)
+        for (int i = 0; i < MAX_ENTITIES; i++) {
+            if (!entityPool[i].active) continue;
+            for (int j = i + 1; j < MAX_ENTITIES; j++) {
+                if (!entityPool[j].active) continue;
+
+                float s = (entityPool[i].scale + entityPool[j].scale) * 0.48f;
+                float dx = fabsf(entityPool[i].x - entityPool[j].x);
+                float dy = fabsf(entityPool[i].y - entityPool[j].y);
+                float dz = fabsf(entityPool[i].z - entityPool[j].z);
+
+                if (dx < s && dy < s && dz < s) {
+                    if (entityPool[i].y > entityPool[j].y) {
+                        entityPool[i].y = entityPool[j].y + s;
+                        entityPool[i].vy = 0.0f;
+                    } else {
+                        entityPool[j].y = entityPool[i].y + s;
+                        entityPool[j].vy = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+
     glClearColor(bgR, bgG, bgB, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -172,7 +223,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
 
     glUseProgram(shaderProgram);
 
-    // 1. Grid
+    // Grid
     float gridM[16], gridMVP[16];
     mat4_identity(gridM);
     mat4_mul(gridMVP, VP, gridM);
@@ -183,7 +234,7 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVertices);
     glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
 
-    // 2. Всички кубове с нормали и контури
+    // Обекти
     for (int i = 0; i < MAX_ENTITIES; i++) {
         if (!entityPool[i].active) continue;
 
@@ -215,6 +266,31 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glDisableVertexAttribArray(1);
 }
 
+// Управление на физиката през JNI
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_setPhysicsEnabled(JNIEnv*, jobject, jboolean enable) {
+    physicsEnabled = enable;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_setGravity(JNIEnv*, jobject, jfloat g) {
+    gravityY = g;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aigame_engine_NativeEngine_applyExplosion(JNIEnv*, jobject, jfloat force) {
+    physicsEnabled = true; // Автоматично пуска физиката при взрив
+    for (int i = 0; i < MAX_ENTITIES; i++) {
+        if (!entityPool[i].active) continue;
+        float dirX = entityPool[i].x + ((float)(rand() % 100) / 100.0f - 0.5f);
+        float dirZ = entityPool[i].z + ((float)(rand() % 100) / 100.0f - 0.5f);
+        float len = sqrtf(dirX * dirX + dirZ * dirZ) + 0.1f;
+        entityPool[i].vx = (dirX / len) * force;
+        entityPool[i].vy = force * 0.75f + ((float)(rand() % 100) / 100.0f) * force * 0.5f;
+        entityPool[i].vz = (dirZ / len) * force;
+    }
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_rotateCamera(JNIEnv*, jobject, jfloat dx, jfloat dy) {
     camYaw += dx;
@@ -239,7 +315,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_spawnCube(JNIEnv*, jobject, jfloat x, jfloat y, jfloat z, jfloat scale, jfloat r, jfloat g, jfloat b) {
     for (int i = 0; i < MAX_ENTITIES; i++) {
         if (!entityPool[i].active) {
-            entityPool[i] = { true, x, y, z, scale, r, g, b };
+            entityPool[i] = { true, x, y, z, 0.0f, 0.0f, 0.0f, scale, r, g, b };
             break;
         }
     }
