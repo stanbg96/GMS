@@ -5,9 +5,6 @@ import android.app.Dialog
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
@@ -18,37 +15,21 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var glSurfaceView: GLSurfaceView
-    private lateinit var toolbarSelected: HorizontalScrollView
-    private lateinit var tvEditorInfo: TextView
+    private lateinit var tvScore: TextView
+    private lateinit var tvGameGoal: TextView
+    private lateinit var tvWinBanner: TextView
     private lateinit var joystickView: JoystickView
     private lateinit var prefs: SharedPreferences
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var adapter: ChatAdapter
 
-    private var downX = 0f
-    private var downY = 0f
-    private var prevX = 0f
-    private var prevY = 0f
-
     private var forwardInput = 0f
     private var strafeInput = 0f
-
-    private var currentSelectedIdx = -1
-    private var isDraggingObject = false
-
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val holdRunnable = Runnable {
-        if (currentSelectedIdx >= 0) {
-            isDraggingObject = true
-            tvEditorInfo.text = "🎯 Влачи с пръст, за да местиш обекта"
-        }
-    }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,110 +42,36 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
-        toolbarSelected = findViewById(R.id.toolbar_selected)
-        tvEditorInfo = findViewById(R.id.tv_editor_info)
+        tvScore = findViewById(R.id.tv_score)
+        tvGameGoal = findViewById(R.id.tv_game_goal)
+        tvWinBanner = findViewById(R.id.tv_win_banner)
         joystickView = findViewById(R.id.joystick_view)
 
-        // Джойстик движение
+        // Джойстик движение на героя
         joystickView.onJoystickMove = { f, s ->
             forwardInput = f
             strafeInput = s
         }
 
+        // 60 FPS геймплей лууп: движи героя и обновява точките
         lifecycleScope.launch {
             while (true) {
                 if (forwardInput != 0f || strafeInput != 0f) {
-                    NativeEngine.moveCamera(forwardInput, strafeInput)
+                    NativeEngine.movePlayer(forwardInput, strafeInput)
+                }
+                val score = NativeEngine.getScore()
+                tvScore.text = "💎 Точки: $score"
+
+                if (NativeEngine.isWon()) {
+                    tvWinBanner.visibility = View.VISIBLE
+                } else {
+                    tvWinBanner.visibility = View.GONE
                 }
                 delay(16)
             }
         }
 
-        // Бутони за Zoom горе вдясно
-        findViewById<Button>(R.id.btn_zoom_in).setOnClickListener { NativeEngine.zoomCamera(1.8f) }
-        findViewById<Button>(R.id.btn_zoom_out).setOnClickListener { NativeEngine.zoomCamera(-1.8f) }
-
-        // Тъч логика
-        glSurfaceView.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.x
-                    downY = event.y
-                    prevX = event.x
-                    prevY = event.y
-                    isDraggingObject = false
-
-                    val hit = NativeEngine.pickObject(event.x, event.y)
-                    if (hit >= 0) {
-                        currentSelectedIdx = hit
-                        toolbarSelected.visibility = View.VISIBLE
-                        tvEditorInfo.text = "Избран обект #$hit (Задръж за влачене)"
-                        mainHandler.postDelayed(holdRunnable, 250)
-                    } else {
-                        mainHandler.removeCallbacks(holdRunnable)
-                    }
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.x - prevX
-                    val dy = event.y - prevY
-
-                    if (isDraggingObject) {
-                        // Влачене на обекта по земята
-                        NativeEngine.moveSelectedXZ(dx * 0.035f, -dy * 0.035f)
-                    } else {
-                        val travel = abs(event.x - downX) + abs(event.y - downY)
-                        if (travel > 18f) {
-                            mainHandler.removeCallbacks(holdRunnable)
-                        }
-                        // Оглеждане с камерата
-                        NativeEngine.rotateLook(dx * 0.0045f, dy * 0.005f)
-                    }
-                    prevX = event.x
-                    prevY = event.y
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    mainHandler.removeCallbacks(holdRunnable)
-                    val travel = abs(event.x - downX) + abs(event.y - downY)
-
-                    if (!isDraggingObject && travel < 18f && currentSelectedIdx < 0) {
-                        NativeEngine.pickObject(-1000f, -1000f)
-                        toolbarSelected.visibility = View.GONE
-                        tvEditorInfo.text = "Докосни обект за избор | Задръж за влачене"
-                    }
-
-                    if (isDraggingObject) {
-                        isDraggingObject = false
-                        tvEditorInfo.text = "Обект #$currentSelectedIdx е преместен"
-                    }
-                }
-            }
-            true
-        }
-
-        // Действия с избрания обект
-        findViewById<Button>(R.id.btn_delete).setOnClickListener {
-            NativeEngine.deleteSelected()
-            toolbarSelected.visibility = View.GONE
-            currentSelectedIdx = -1
-            tvEditorInfo.text = "Обектът е изтрит"
-        }
-        findViewById<Button>(R.id.btn_duplicate).setOnClickListener {
-            NativeEngine.duplicateSelected()
-            tvEditorInfo.text = "Обектът е дублиран"
-        }
-        findViewById<Button>(R.id.btn_scale_up).setOnClickListener { NativeEngine.scaleSelected(1.25f) }
-        findViewById<Button>(R.id.btn_scale_down).setOnClickListener { NativeEngine.scaleSelected(0.80f) }
-        findViewById<Button>(R.id.btn_rotate).setOnClickListener { NativeEngine.rotateSelected(30f) }
-        findViewById<Button>(R.id.btn_up).setOnClickListener { NativeEngine.moveSelectedY(0.4f) }
-        findViewById<Button>(R.id.btn_down).setOnClickListener { NativeEngine.moveSelectedY(-0.4f) }
-        findViewById<Button>(R.id.btn_close_selection).setOnClickListener {
-            NativeEngine.pickObject(-1000f, -1000f)
-            toolbarSelected.visibility = View.GONE
-            currentSelectedIdx = -1
-            tvEditorInfo.text = "Докосни обект за избор | Задръж за влачене"
-        }
-
-        // ЧАТ СИСТЕМА (30%)
+        // Чат и конзола
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -174,7 +81,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("3D Editor активен: Джойстик долу вляво, Zoom (+/-) горе вдясно.", false)
+        addMessage("GMS Game Engine готов. Опиши каква игра искаш да създадеш!", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
@@ -193,12 +100,14 @@ class MainActivity : AppCompatActivity() {
                 addMessage(text, true)
                 chatInput.text.clear()
 
-                addMessage("...", false)
+                addMessage("Създавам играта в реално време...", false)
                 val loadingIndex = messages.size - 1
 
                 lifecycleScope.launch {
                     val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                    messages[loadingIndex] = ChatMessage(rawReply, false)
+                    val cleanReply = parseAndBuildGame(rawReply)
+
+                    messages[loadingIndex] = ChatMessage(cleanReply, false)
                     adapter.notifyItemChanged(loadingIndex)
                     chatRecycler.scrollToPosition(loadingIndex)
                 }
@@ -206,10 +115,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun addMessage(text: String, isUser: Boolean) {
-        messages.add(ChatMessage(text, isUser))
-        adapter.notifyItemInserted(messages.size - 1)
-        findViewById<RecyclerView>(R.id.chat_recycler).scrollToPosition(messages.size - 1)
+    private fun parseAndBuildGame(reply: String): String {
+        val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
+        val matches = regex.findAll(reply)
+
+        for (match in matches) {
+            val cmd = match.groupValues[1].uppercase()
+            val rawValue = match.groupValues[2]
+
+            try {
+                when (cmd) {
+                    "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
+                    "SKY", "НЕБЕ" -> {
+                        val rgb = rawValue.split(",").map { it.trim().toFloat() }
+                        if (rgb.size == 3) NativeEngine.setSky(rgb[0], rgb[1], rgb[2])
+                    }
+                    "GOAL", "ЦЕЛ" -> {
+                        tvGameGoal.text = rawValue
+                    }
+                    "SPAWN", "СПАУН" -> {
+                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
+                        val n = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
+
+                        if (n.size >= 11) {
+                            var r = n[6]; var g = n[7]; var b = n[8]
+                            if (r > 1.0f) r /= 255f; if (g > 1.0f) g /= 255f; if (b > 1.0f) b /= 255f
+                            val beh = n[9].toInt()
+                            val touch = n[10].toInt()
+                            NativeEngine.spawnEntity(n[0], n[1], n[2], n[3], n[4], n[5], r, g, b, beh, touch)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return reply.replace(regex, "").trim()
     }
 
     private fun showAiCloudDialog() {

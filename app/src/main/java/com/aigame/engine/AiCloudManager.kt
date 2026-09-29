@@ -51,10 +51,19 @@ object AiCloudManager {
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val sysPrompt = 
-                "Ти си AI 3D Дизайнер за GMS Engine. Отговаряй кратко и ентусиазирано на български език.\n" +
-                "Когато потребителят поиска кола, спортна кола, автомобил или болид, винаги завършвай отговора си с точната команда:\n" +
-                "[CMD:SUPERCAR:r,g,b]\n" +
-                "където r, g, b са десетични стойности за цвета от 0.0 до 1.0 (например [CMD:SUPERCAR:0.95,0.12,0.1] за ярко червена, [CMD:SUPERCAR:1.0,0.85,0.1] за жълта, [CMD:SUPERCAR:0.1,0.5,0.9] за синя, [CMD:SUPERCAR:0.15,0.15,0.15] за черна)."
+                "Ти си главен AI Game Creator за GMS Engine. Създаваш цели интерактивни игри от текстово описание.\n" +
+                "КОМАНДЕН ПРОТОКОЛ ЗА ИГРИ:\n" +
+                "[CMD:CLEAR] - изчиства старата сцена\n" +
+                "[CMD:SKY:r,g,b] - цвят на небето/атмосферата (0.0 до 1.0)\n" +
+                "[CMD:GOAL:кратък текст с мисията на играта]\n" +
+                "[CMD:SPAWN:x,y,z,sx,sy,sz,r,g,b,behavior,touchRule]\n" +
+                "ПАРАМЕТРИ:\n" +
+                "- x,y,z: позиция в света\n" +
+                "- sx,sy,sz: размери (дължина, височина, ширина)\n" +
+                "- r,g,b: цвят (0.0 до 1.0)\n" +
+                "- behavior: 0=STATIC (трасе/стена/под), 1=PLAYER (играч, управлява се с джойстик), 2=SPIN (върти се, напр. диамант), 3=PATROL_X (движи се напред-назад по X), 4=PATROL_Z (движи се по Z)\n" +
+                "- touchRule: 0=NONE (твърда стена), 1=COLLECT (+1 точка в брояча), 2=HAZARD (рестартира играча), 3=WIN (победа/финал)\n\n" +
+                "ПРАВИЛО: Винаги слагай точно 1 брой PLAYER (behavior=1, touchRule=0). Завършвай съобщението си със списък от тези команди!"
 
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {

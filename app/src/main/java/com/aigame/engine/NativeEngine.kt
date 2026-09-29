@@ -9,19 +9,14 @@ object NativeEngine {
     external fun onSurfaceChanged(width: Int, height: Int)
     external fun onDrawFrame()
 
-    // Камера и движение
-    external fun moveCamera(forwardInput: Float, strafeInput: Float)
-    external fun rotateLook(dx: Float, dy: Float)
-    external fun zoomCamera(delta: Float)
+    external fun movePlayer(forwardInput: Float, strafeInput: Float)
+    external fun getScore(): Int
+    external fun isWon(): Boolean
 
-    // Raycast селекция и преместване
-    external fun pickObject(tapX: Float, tapY: Float): Int
-    external fun moveSelectedXZ(deltaRight: Float, deltaForward: Float)
-
-    // Операции с обекта
-    external fun deleteSelected()
-    external fun duplicateSelected()
-    external fun scaleSelected(factor: Float)
-    external fun rotateSelected(deg: Float)
-    external fun moveSelectedY(deltaY: Float)
+    external fun clearWorld()
+    external fun setSky(r: Float, g: Float, b: Float)
+    external fun spawnEntity(x: Float, y: Float, z: Float,
+                            sx: Float, sy: Float, sz: Float,
+                            r: Float, g: Float, b: Float,
+                            behavior: Int, touchRule: Int)
 }
