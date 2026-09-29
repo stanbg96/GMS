@@ -9,14 +9,17 @@ object NativeEngine {
     external fun onSurfaceChanged(width: Int, height: Int)
     external fun onDrawFrame()
 
-    // Управление и универсални действия
+    // Моментален рестарт
+    external fun restartGame()
+
+    // Управление и екшън
     external fun movePlayer(forwardInput: Float, strafeInput: Float)
-    external fun triggerAction(actionType: Int) // 1=Удар, 2=Стрелба, 3=Скок
+    external fun triggerAction(actionType: Int)
     external fun getPlayerHp(): Int
     external fun getScore(): Int
     external fun isWon(): Boolean
 
-    // Универсално изграждане на светове от AI
+    // Изграждане и AI
     external fun clearWorld()
     external fun setSky(r: Float, g: Float, b: Float)
     external fun spawnEntity(x: Float, y: Float, z: Float,

@@ -60,11 +60,10 @@ class MainActivity : AppCompatActivity() {
             strafeInput = s
         }
 
-        // Действия на бутоните A и B
         btnActionA.setOnClickListener { NativeEngine.triggerAction(actionAType) }
         btnActionB.setOnClickListener { NativeEngine.triggerAction(actionBType) }
 
-        // 60 FPS геймплей цикъл
+        // 60 FPS геймплей лууп
         lifecycleScope.launch {
             while (true) {
                 if (forwardInput != 0f || strafeInput != 0f) {
@@ -84,7 +83,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Чат интерфейс
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -94,36 +92,48 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("Universal Game Engine готов. Опиши каква игра искаш да създадеш!", false)
+        addMessage("GMS Live Engine е готов. Напиши какво да се случи или рестарт!", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
         btnSend.setOnClickListener {
             val text = chatInput.text.toString().trim()
-            if (text.isNotEmpty()) {
-                val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
-                val key = prefs.getString("ai_api_key", "") ?: ""
-                val model = prefs.getString("ai_model", "") ?: ""
+            if (text.isEmpty()) return@setOnClickListener
 
-                if (key.isEmpty() || model.isEmpty() || model == "Не е избран") {
-                    addMessage("Система: Моля, настройте AI Cloud от бутона ☁️ AI!", false)
-                    return@setOnClickListener
-                }
+            addMessage(text, true)
+            chatInput.text.clear()
 
-                addMessage(text, true)
-                chatInput.text.clear()
+            // СВЕТКАВИЧЕН РЕСТАРТ: ако напишеш 'рестарт', занулява веднага без чакане на интернет!
+            val lower = text.lowercase().trim()
+            if (lower == "рестарт" || lower == "рестартирай" || lower == "рестартирай играта" ||
+                lower == "пак" || lower == "отново" || lower == "нова игра") {
+                NativeEngine.restartGame()
+                tvWinBanner.visibility = View.GONE
+                tvHp.text = "❤️ 100 HP"
+                tvScore.text = "💎 0"
+                addMessage("Играта е рестартирана мигновено!", false)
+                return@setOnClickListener
+            }
 
-                addMessage("Създавам играта в реално време...", false)
-                val loadingIndex = messages.size - 1
+            val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
+            val key = prefs.getString("ai_api_key", "") ?: ""
+            val model = prefs.getString("ai_model", "") ?: ""
 
-                lifecycleScope.launch {
-                    val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                    val cleanReply = parseAndBuildGame(rawReply)
+            if (key.isEmpty() || model.isEmpty() || model == "Не е избран") {
+                addMessage("Система: Моля, въведи API ключ от ☁️ AI бутона!", false)
+                return@setOnClickListener
+            }
 
-                    messages[loadingIndex] = ChatMessage(cleanReply, false)
-                    adapter.notifyItemChanged(loadingIndex)
-                    chatRecycler.scrollToPosition(loadingIndex)
-                }
+            addMessage("Модифицирам играта на живо...", false)
+            val loadingIndex = messages.size - 1
+
+            lifecycleScope.launch {
+                val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
+                val cleanReply = parseAndApplyGameCommands(rawReply)
+
+                messages[loadingIndex] = ChatMessage(cleanReply, false)
+                adapter.notifyItemChanged(loadingIndex)
+                chatRecycler.scrollToPosition(loadingIndex)
             }
         }
     }
@@ -134,7 +144,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<RecyclerView>(R.id.chat_recycler)?.scrollToPosition(messages.size - 1)
     }
 
-    private fun parseAndBuildGame(reply: String): String {
+    private fun parseAndApplyGameCommands(reply: String): String {
         val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
 
@@ -144,6 +154,10 @@ class MainActivity : AppCompatActivity() {
 
             try {
                 when (cmd) {
+                    "RESTART", "РЕСТАРТ" -> {
+                        NativeEngine.restartGame()
+                        tvWinBanner.visibility = View.GONE
+                    }
                     "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
                     "SKY", "НЕБЕ" -> {
                         val rgb = rawValue.split(",").map { it.trim().toFloat() }
@@ -210,7 +224,7 @@ class MainActivity : AppCompatActivity() {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
             if (key.isEmpty()) {
-                tvStatus.text = "Моля, въведи API ключ!"
+                tvStatus.text = "Въведи ключ!"
                 tvStatus.setTextColor(0xFFFF0000.toInt())
                 return@setOnClickListener
             }
@@ -238,11 +252,11 @@ class MainActivity : AppCompatActivity() {
             val key = etApiKey.text.toString().trim()
             val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else ""
             if (key.isEmpty() || model.isEmpty()) {
-                tvStatus.text = "Избери модел първо!"
+                tvStatus.text = "Избери модел!"
                 tvStatus.setTextColor(0xFFFF0000.toInt())
                 return@setOnClickListener
             }
-            tvStatus.text = "Тестване..."
+            tvStatus.text = "Тест..."
             tvStatus.setTextColor(0xFFFFFF00.toInt())
             lifecycleScope.launch {
                 val res = AiCloudManager.generateResponse(provider, key, model, "Тест. Кажи 'Работи!'.")
