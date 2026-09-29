@@ -2,16 +2,16 @@
 #include <GLES3/gl3.h>
 #include <cmath>
 
-static float bgR = 0.14f, bgG = 0.16f, bgB = 0.22f;
+static float bgR = 0.10f, bgG = 0.08f, bgB = 0.12f; // Mortal Kombat нощно небе
 static float aspect = 1.0f;
+
 static float camX = 0.0f, camY = 5.5f, camZ = 10.0f;
 
 static int playerHp = 100, playerMaxHp = 100;
 static int gameScore = 0;
 static bool gameWon = false;
-static float pStartX = 0.0f, pStartY = 0.6f, pStartZ = 0.0f;
+static float pStartX = 0.0f, pStartY = 0.7f, pStartZ = 2.0f;
 
-// Универсални тагове за всички игри
 enum Tag { TAG_SOLID = 0, TAG_PLAYER = 1, TAG_ENEMY = 2, TAG_ITEM = 3, TAG_BULLET = 4, TAG_GOAL = 5 };
 
 struct Entity {
@@ -23,17 +23,23 @@ struct Entity {
     float rotY;
     float r, g, b;
     int hp;
-    int aiType; // 0: стои, 1: преследва играча, 2: патрулира, 3: лети напред (куршум)
+    int aiType;
 };
 
 #define MAX_ENTITIES 96
 static Entity entities[MAX_ENTITIES];
 
 static GLuint shaderProg = 0;
-static GLint mvpLoc = -1, colorLoc = -1;
+static GLint mvpLoc = -1, colorLoc = -1, useLightLoc = -1;
 
 #define GRID_LINES 42
 static float gridVerts[GRID_LINES * 2 * 3];
+
+// Каменна бойна арена (Solid Ground Floor)
+static const float ARENA_FLOOR[] = {
+    -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,
+    -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,  -20.0f, 0.0f,  20.0f,  0,1,0
+};
 
 static const float CUBE[] = {
     -0.5f,-0.5f, 0.5f, 0,0,1,  0.5f,-0.5f, 0.5f, 0,0,1,  0.5f, 0.5f, 0.5f, 0,0,1,
@@ -63,10 +69,15 @@ static const char* FS =
     "precision mediump float;\n"
     "in vec3 vN;\n"
     "uniform vec3 uCol;\n"
+    "uniform int uUseLight;\n"
     "out vec4 oC;\n"
     "void main(){\n"
-    "    float d = max(dot(normalize(vN), normalize(vec3(0.4,0.9,0.5))), 0.0) * 0.60 + 0.40;\n"
-    "    oC = vec4(uCol * d, 1.0);\n"
+    "    if (uUseLight == 1) {\n"
+    "        float d = max(dot(normalize(vN), normalize(vec3(0.4,0.9,0.5))), 0.0) * 0.60 + 0.40;\n"
+    "        oC = vec4(uCol * d, 1.0);\n"
+    "    } else {\n"
+    "        oC = vec4(uCol, 1.0);\n"
+    "    }\n"
     "}\n";
 
 static void mat4_identity(float* m) { for(int i=0; i<16; i++) m[i]=(i%5==0)?1.0f:0.0f; }
@@ -81,6 +92,31 @@ static void mat4_mul(float* out, const float* a, const float* b) {
     for(int i=0; i<16; i++) out[i] = t[i];
 }
 
+// Перфектна камера, насочена винаги към играча и враговете
+static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float ty, float tz, float ux, float uy, float uz) {
+    float fx = tx - ex, fy = ty - ey, fz = tz - ez;
+    float rlf = 1.0f / sqrtf(fx*fx + fy*fy + fz*fz);
+    fx *= rlf; fy *= rlf; fz *= rlf;
+
+    float rx = fy * uz - fz * uy;
+    float ry = fz * ux - fx * uz;
+    float rz = fx * uy - fy * ux;
+    float rlr = 1.0f / sqrtf(rx*rx + ry*ry + rz*rz);
+    rx *= rlr; ry *= rlr; rz *= rlr;
+
+    float ux2 = ry * fz - rz * fy;
+    float uy2 = rz * fx - rx * fz;
+    float uz2 = rx * fy - ry * fx;
+
+    m[0] = rx;  m[1] = ux2; m[2] = -fx; m[3] = 0.0f;
+    m[4] = ry;  m[5] = uy2; m[6] = -fy; m[7] = 0.0f;
+    m[8] = rz;  m[9] = uz2; m[10]= -fz; m[11]= 0.0f;
+    m[12]= -(rx*ex + ry*ey + rz*ez);
+    m[13]= -(ux2*ex + uy2*ey + uz2*ez);
+    m[14]= (fx*ex + fy*ey + fz*ez);
+    m[15]= 1.0f;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     GLuint vs = glCreateShader(GL_VERTEX_SHADER); glShaderSource(vs,1,&VS,nullptr); glCompileShader(vs);
@@ -90,16 +126,21 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     glLinkProgram(shaderProg);
     mvpLoc = glGetUniformLocation(shaderProg, "uMVP");
     colorLoc = glGetUniformLocation(shaderProg, "uCol");
+    useLightLoc = glGetUniformLocation(shaderProg, "uUseLight");
     glEnable(GL_DEPTH_TEST);
 
     int idx = 0;
     for(int i=-10; i<=10; i++){
-        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.0f; gridVerts[idx++]=-10.0f;
-        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.0f; gridVerts[idx++]=10.0f;
-        gridVerts[idx++]=-10.0f;   gridVerts[idx++]=0.0f; gridVerts[idx++]=(float)i;
-        gridVerts[idx++]=10.0f;    gridVerts[idx++]=0.0f; gridVerts[idx++]=(float)i;
+        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.01f; gridVerts[idx++]=-10.0f;
+        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.01f; gridVerts[idx++]=10.0f;
+        gridVerts[idx++]=-10.0f;   gridVerts[idx++]=0.01f; gridVerts[idx++]=(float)i;
+        gridVerts[idx++]=10.0f;    gridVerts[idx++]=0.01f; gridVerts[idx++]=(float)i;
     }
+
+    // Стартов боец и нинджа арена
     for(int i=0; i<MAX_ENTITIES; i++) entities[i].active = false;
+    entities[0] = { true, TAG_PLAYER, 0.0f, 0.9f, 2.0f, 0,0,0, 1.0f, 1.8f, 0.8f, 0.0f, 0.95f, 0.75f, 0.1f, 100, 0 };
+    entities[1] = { true, TAG_ENEMY,  0.0f, 0.9f,-3.0f, 0,0,0, 1.0f, 1.8f, 0.8f, 0.0f, 0.75f, 0.15f, 0.85f, 80, 1 };
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -108,7 +149,6 @@ Java_com_aigame_engine_NativeEngine_onSurfaceChanged(JNIEnv*, jobject, jint w, j
     aspect = (float)w / (float)(h>0?h:1);
 }
 
-// 60 FPS УНИВЕРСАЛЕН ГЕЙМПЛЕЙ ЦИКЪЛ
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     int pIdx = -1;
@@ -116,95 +156,99 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
         if(entities[i].active && entities[i].tag == TAG_PLAYER) { pIdx = i; break; }
     }
 
-    // 1. Изкуствен интелект и физика на снарядите
+    // 1. Изкуствен интелект на враговете (Нинджите преследват играча)
     for(int i=0; i<MAX_ENTITIES; i++){
         if(!entities[i].active) continue;
 
-        // Физика на куршуми / снаряди
         if(entities[i].aiType == 3) {
+            // Куршум/снаряд
             entities[i].x += entities[i].vx;
             entities[i].z += entities[i].vz;
-            // Проверка за попадение във враг
             for(int j=0; j<MAX_ENTITIES; j++){
                 if(entities[j].active && entities[j].tag == TAG_ENEMY){
-                    float dx = entities[i].x - entities[j].x;
-                    float dz = entities[i].z - entities[j].z;
+                    float dx = entities[i].x - entities[j].x, dz = entities[i].z - entities[j].z;
                     if(sqrtf(dx*dx + dz*dz) < 1.4f){
                         entities[j].hp -= 35;
-                        entities[i].active = false; // Куршумът изчезва
+                        entities[i].active = false;
                         if(entities[j].hp <= 0){ entities[j].active = false; gameScore += 100; }
                         break;
                     }
                 }
             }
         }
-        // AI на враг: преследва играча
         else if(entities[i].aiType == 1 && pIdx >= 0) {
             float dx = entities[pIdx].x - entities[i].x;
             float dz = entities[pIdx].z - entities[i].z;
             float dist = sqrtf(dx*dx + dz*dz);
-            if(dist > 1.4f) {
+            if(dist > 1.5f) {
                 entities[i].x += (dx / dist) * 0.045f;
                 entities[i].z += (dz / dist) * 0.045f;
             } else {
-                // Атака отблизо
-                static int atkCooldown = 0;
-                if(++atkCooldown > 40) {
-                    atkCooldown = 0;
+                static int atkCd = 0;
+                if(++atkCd > 30) {
+                    atkCd = 0;
                     playerHp -= 10;
                     if(playerHp <= 0) { playerHp = playerMaxHp; entities[pIdx].x = pStartX; entities[pIdx].z = pStartZ; }
                 }
             }
         }
-        // Въртящ се предмет (монета/звезда)
-        else if(entities[i].tag == TAG_ITEM) {
-            entities[i].rotY += 3.5f;
-        }
     }
 
-    // 2. Колизии на Играча с предмети и финал
+    // 2. Камерата винаги следва играча отвисоко и под ъгъл
+    float targetX = 0.0f, targetY = 0.9f, targetZ = 0.0f;
     if(pIdx >= 0) {
-        float px = entities[pIdx].x, py = entities[pIdx].y, pz = entities[pIdx].z;
+        targetX = entities[pIdx].x;
+        targetY = entities[pIdx].y;
+        targetZ = entities[pIdx].z;
 
-        // Камерата следва плавно играча
-        camX = px * 0.5f;
-        camY = py + 4.8f;
-        camZ = pz + 8.5f;
-
-        for(int i=0; i<MAX_ENTITIES; i++){
-            if(!entities[i].active || i == pIdx) continue;
-            float dx = px - entities[i].x, dz = pz - entities[i].z;
-            float dist = sqrtf(dx*dx + dz*dz);
-
-            if(dist < 1.3f) {
-                if(entities[i].tag == TAG_ITEM) { entities[i].active = false; gameScore += 10; }
-                else if(entities[i].tag == TAG_GOAL) { gameWon = true; }
-            }
-        }
+        camX = targetX;
+        camY = targetY + 6.0f;
+        camZ = targetZ + 10.0f;
     }
 
     glClearColor(bgR, bgG, bgB, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if(shaderProg == 0) return;
 
+    // Перспектива
     float P[16]; mat4_identity(P);
     float tanHalf = tanf(45.0f * 0.5f * 3.14159f / 180.0f);
     P[0] = 1.0f / (aspect * tanHalf); P[5] = 1.0f / tanHalf;
     P[10] = -100.1f / 99.9f; P[11] = -1.0f; P[14] = -20.0f / 99.9f; P[15] = 0.0f;
 
-    float V[16]; mat4_identity(V);
-    float pitch = -0.32f;
-    float cp = cosf(pitch), sp = sinf(pitch);
-    V[0]=1.0f; V[5]=cp; V[6]=sp; V[9]=-sp; V[10]=cp;
-    V[12]=-camX; V[13]=-(cp*camY - sp*camZ); V[14]=-(sp*camY + cp*camZ);
+    // LookAt матрица – фокусира се върху играча
+    float V[16];
+    mat4_lookat(V, camX, camY, camZ, targetX, targetY, targetZ, 0.0f, 1.0f, 0.0f);
 
     float VP[16]; mat4_mul(VP, P, V);
     glUseProgram(shaderProg);
 
     glEnable(GL_DEPTH_TEST);
+
+    // 1. Каменен под на арената
+    glUniform1i(useLightLoc, 1);
+    float floorM[16], floorMVP[16];
+    mat4_identity(floorM);
+    mat4_mul(floorMVP, VP, floorM);
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, floorMVP);
+    glUniform3f(colorLoc, 0.22f, 0.20f, 0.25f);
+
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), ARENA_FLOOR);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &ARENA_FLOOR[3]);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 
+    // 2. Линии на мрежата
+    glUniform1i(useLightLoc, 0);
+    glUniform3f(colorLoc, 0.35f, 0.32f, 0.40f);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVerts);
+    glDisableVertexAttribArray(1);
+    glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
+
+    // 3. Бойци и обекти
+    glUniform1i(useLightLoc, 1);
+    glEnableVertexAttribArray(1);
     for(int i=0; i<MAX_ENTITIES; i++){
         if(!entities[i].active) continue;
         float rad = entities[i].rotY * 0.017453f;
@@ -226,7 +270,6 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glDisableVertexAttribArray(1);
 }
 
-// УНИВЕРСАЛНИ ДЕЙСТВИЯ НА БУТОНИТЕ (Trigger Actions)
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_triggerAction(JNIEnv*, jobject, jint actionType) {
     int pIdx = -1;
@@ -235,35 +278,33 @@ Java_com_aigame_engine_NativeEngine_triggerAction(JNIEnv*, jobject, jint actionT
     }
     if(pIdx < 0) return;
 
-    // 1: Ръкопашен удар (Melee / Punch / Kick)
-    if(actionType == 1) {
-        float px = entities[pIdx].x, pz = entities[pIdx].z;
+    float px = entities[pIdx].x, pz = entities[pIdx].z;
+
+    // Удар / НУНЧАКУ срещу врага
+    if(actionType == 1 || actionType == 2) {
         for(int i=0; i<MAX_ENTITIES; i++){
             if(entities[i].active && entities[i].tag == TAG_ENEMY){
                 float dx = entities[i].x - px, dz = entities[i].z - pz;
                 float dist = sqrtf(dx*dx + dz*dz);
-                if(dist < 2.5f){
-                    entities[i].hp -= 40;
-                    entities[i].x += (dx / dist) * 1.5f; // Откат назад
-                    entities[i].z += (dz / dist) * 1.5f;
-                    if(entities[i].hp <= 0){ entities[i].active = false; gameScore += 100; }
+                if(dist < 2.8f){
+                    int dmg = (actionType == 1) ? 25 : 45;
+                    entities[i].hp -= dmg;
+                    // Отхвърляне на врага назад (Knockback)
+                    if(dist > 0.05f) {
+                        entities[i].x += (dx / dist) * 1.6f;
+                        entities[i].z += (dz / dist) * 1.6f;
+                    }
+                    if(entities[i].hp <= 0){
+                        entities[i].active = false;
+                        gameScore += 100;
+                        gameWon = true; // ПОБЕДА!
+                    }
                 }
             }
         }
     }
-    // 2: Стрелба със снаряд (Shoot Bullet / Fireball)
-    else if(actionType == 2) {
-        for(int i=0; i<MAX_ENTITIES; i++){
-            if(!entities[i].active){
-                entities[i] = { true, TAG_BULLET, entities[pIdx].x, entities[pIdx].y, entities[pIdx].z - 1.0f,
-                                0.0f, 0.0f, -0.45f, 0.35f, 0.35f, 0.35f, 0.0f, 1.0f, 0.85f, 0.1f, 1, 3 };
-                break;
-            }
-        }
-    }
-    // 3: Скок / Ускорение (Jump / Dash)
     else if(actionType == 3) {
-        entities[pIdx].y += 1.8f;
+        entities[pIdx].y += 2.0f; // Скок
     }
 }
 
@@ -274,7 +315,7 @@ Java_com_aigame_engine_NativeEngine_movePlayer(JNIEnv*, jobject, jfloat f, jfloa
             float speed = 0.30f;
             entities[i].z -= f * speed;
             entities[i].x += s * speed;
-            if(entities[i].y > pStartY) entities[i].y -= 0.08f; // Гравитация след скок
+            if(entities[i].y > pStartY) entities[i].y -= 0.09f;
             break;
         }
     }
