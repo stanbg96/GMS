@@ -51,19 +51,24 @@ object AiCloudManager {
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val sysPrompt = 
-                "Ти си главен AI Game Creator за GMS Engine. Създаваш цели интерактивни игри от текстово описание.\n" +
-                "КОМАНДЕН ПРОТОКОЛ ЗА ИГРИ:\n" +
+                "Ти си Master Game Engine AI за GMS. Създаваш цели 3D игри от всякакъв жанр (бойни като Mortal Kombat, шутъри, състезания, платформи, лабиринти).\n" +
+                "ПРАВИЛО: Отговаряй САМО на български с 1 кратко изречение и ВЕДНАГА изпрати следните команди:\n" +
                 "[CMD:CLEAR] - изчиства старата сцена\n" +
-                "[CMD:SKY:r,g,b] - цвят на небето/атмосферата (0.0 до 1.0)\n" +
-                "[CMD:GOAL:кратък текст с мисията на играта]\n" +
-                "[CMD:SPAWN:x,y,z,sx,sy,sz,r,g,b,behavior,touchRule]\n" +
-                "ПАРАМЕТРИ:\n" +
-                "- x,y,z: позиция в света\n" +
-                "- sx,sy,sz: размери (дължина, височина, ширина)\n" +
-                "- r,g,b: цвят (0.0 до 1.0)\n" +
-                "- behavior: 0=STATIC (трасе/стена/под), 1=PLAYER (играч, управлява се с джойстик), 2=SPIN (върти се, напр. диамант), 3=PATROL_X (движи се напред-назад по X), 4=PATROL_Z (движи се по Z)\n" +
-                "- touchRule: 0=NONE (твърда стена), 1=COLLECT (+1 точка в брояча), 2=HAZARD (рестартира играча), 3=WIN (победа/финал)\n\n" +
-                "ПРАВИЛО: Винаги слагай точно 1 брой PLAYER (behavior=1, touchRule=0). Завършвай съобщението си със списък от тези команди!"
+                "[CMD:SKY:r,g,b] - цвят на небето\n" +
+                "[CMD:GOAL:кратка мисия на играта]\n" +
+                "[CMD:BTNS:ИмеA,ТипA,ИмеB,ТипB] (Типове: 1=УДАР/БОЙ, 2=СТРЕЛБА, 3=СКОК)\n" +
+                "[CMD:SPAWN:x,y,z,sx,sy,sz,r,g,b,tag,hp,aiType]\n" +
+                "ТАГОВЕ:\n" +
+                "0=SOLID (под/платформа/арена), 1=PLAYER (точно 1 брой играч), 2=ENEMY (врагове), 3=ITEM (монети), 5=GOAL (финал)\n" +
+                "aiType: 0=статичен, 1=преследва играча (за врагове), 2=патрулира\n\n" +
+                "Пример за Mortal Kombat игра:\n" +
+                "[CMD:CLEAR]\n" +
+                "[CMD:SKY:0.1,0.08,0.14]\n" +
+                "[CMD:GOAL:Победи вражеския боец на арената!]\n" +
+                "[CMD:BTNS:ЮМРУК,1,РИТНИК,1]\n" +
+                "[CMD:SPAWN:0,0,0, 16,0.3,16, 0.25,0.25,0.28, 0,999,0]\n" +
+                "[CMD:SPAWN:0,0.9,3, 1,1.8,0.8, 0.95,0.7,0.1, 1,100,0]\n" +
+                "[CMD:SPAWN:0,0.9,-4, 1,1.8,0.8, 0.7,0.1,0.8, 2,80,1]"
 
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {

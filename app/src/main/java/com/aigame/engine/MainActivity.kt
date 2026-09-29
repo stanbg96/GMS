@@ -19,10 +19,13 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var glSurfaceView: GLSurfaceView
+    private lateinit var tvHp: TextView
     private lateinit var tvScore: TextView
     private lateinit var tvGameGoal: TextView
     private lateinit var tvWinBanner: TextView
     private lateinit var joystickView: JoystickView
+    private lateinit var btnActionA: Button
+    private lateinit var btnActionB: Button
     private lateinit var prefs: SharedPreferences
 
     private val messages = mutableListOf<ChatMessage>()
@@ -30,6 +33,8 @@ class MainActivity : AppCompatActivity() {
 
     private var forwardInput = 0f
     private var strafeInput = 0f
+    private var actionAType = 1
+    private var actionBType = 1
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,25 +47,33 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
+        tvHp = findViewById(R.id.tv_hp)
         tvScore = findViewById(R.id.tv_score)
         tvGameGoal = findViewById(R.id.tv_game_goal)
         tvWinBanner = findViewById(R.id.tv_win_banner)
         joystickView = findViewById(R.id.joystick_view)
+        btnActionA = findViewById(R.id.btn_action_a)
+        btnActionB = findViewById(R.id.btn_action_b)
 
-        // Джойстик движение на героя
         joystickView.onJoystickMove = { f, s ->
             forwardInput = f
             strafeInput = s
         }
 
-        // 60 FPS геймплей лууп: движи героя и обновява точките
+        // Действия на бутоните A и B
+        btnActionA.setOnClickListener { NativeEngine.triggerAction(actionAType) }
+        btnActionB.setOnClickListener { NativeEngine.triggerAction(actionBType) }
+
+        // 60 FPS геймплей цикъл
         lifecycleScope.launch {
             while (true) {
                 if (forwardInput != 0f || strafeInput != 0f) {
                     NativeEngine.movePlayer(forwardInput, strafeInput)
                 }
+                val hp = NativeEngine.getPlayerHp()
                 val score = NativeEngine.getScore()
-                tvScore.text = "💎 Точки: $score"
+                tvHp.text = "❤️ $hp HP"
+                tvScore.text = "💎 $score"
 
                 if (NativeEngine.isWon()) {
                     tvWinBanner.visibility = View.VISIBLE
@@ -71,7 +84,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Чат и конзола
+        // Чат интерфейс
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -81,7 +94,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("GMS Game Engine готов. Опиши каква игра искаш да създадеш!", false)
+        addMessage("Universal Game Engine готов. Опиши каква игра искаш да създадеш!", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
@@ -139,16 +152,26 @@ class MainActivity : AppCompatActivity() {
                     "GOAL", "ЦЕЛ" -> {
                         tvGameGoal.text = rawValue
                     }
+                    "BTNS", "БУТОНИ" -> {
+                        val parts = rawValue.split(",")
+                        if (parts.size >= 4) {
+                            btnActionA.text = parts[0].trim()
+                            actionAType = parts[1].trim().toInt()
+                            btnActionB.text = parts[2].trim()
+                            actionBType = parts[3].trim().toInt()
+                        }
+                    }
                     "SPAWN", "СПАУН" -> {
                         val numRegex = Regex("[-+]?\\d*\\.?\\d+")
                         val n = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
 
-                        if (n.size >= 11) {
+                        if (n.size >= 12) {
                             var r = n[6]; var g = n[7]; var b = n[8]
                             if (r > 1.0f) r /= 255f; if (g > 1.0f) g /= 255f; if (b > 1.0f) b /= 255f
-                            val beh = n[9].toInt()
-                            val touch = n[10].toInt()
-                            NativeEngine.spawnEntity(n[0], n[1], n[2], n[3], n[4], n[5], r, g, b, beh, touch)
+                            val tag = n[9].toInt()
+                            val hp = n[10].toInt()
+                            val ai = n[11].toInt()
+                            NativeEngine.spawnEntity(n[0], n[1], n[2], n[3], n[4], n[5], r, g, b, tag, hp, ai)
                         }
                     }
                 }
