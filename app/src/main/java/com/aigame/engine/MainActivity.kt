@@ -115,6 +115,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun addMessage(text: String, isUser: Boolean) {
+        messages.add(ChatMessage(text, isUser))
+        adapter.notifyItemInserted(messages.size - 1)
+        findViewById<RecyclerView>(R.id.chat_recycler)?.scrollToPosition(messages.size - 1)
+    }
+
     private fun parseAndBuildGame(reply: String): String {
         val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
         val matches = regex.findAll(reply)
