@@ -1,45 +1,52 @@
 #include <jni.h>
 #include <GLES3/gl3.h>
 #include <cmath>
-#include <cstdlib>
+#include <string>
+#include <vector>
+#include <entt/entt.hpp>
+#include <nlohmann/json.hpp>
 
-static float bgR = 0.12f, bgG = 0.10f, bgB = 0.15f;
+using json = nlohmann::json;
+
+static float bgR = 0.15f, bgG = 0.18f, bgB = 0.24f;
 static float aspect = 1.0f;
+static float camX = 0.0f, camY = 6.0f, camZ = 12.0f;
 
-static float camX = 0.0f, camY = 5.5f, camZ = 10.0f;
-static int playerHp = 100, playerMaxHp = 100;
 static int gameScore = 0;
 static bool gameWon = false;
-static float pStartX = 0.0f, pStartY = 0.0f, pStartZ = 2.0f;
-static float attackAnimTimer = 0.0f;
+static float pStartX = 0.0f, pStartY = 0.6f, pStartZ = 0.0f;
 
-enum Tag { TAG_SOLID = 0, TAG_PLAYER = 1, TAG_ENEMY = 2, TAG_ITEM = 3, TAG_BULLET = 4, TAG_GOAL = 5 };
-
-struct Entity {
-    bool active;
-    int tag;
+// 1. EnTT ECS Компоненти
+struct TransformComponent {
     float x, y, z;
-    float vx, vy, vz;
     float sx, sy, sz;
     float rotY;
-    float r, g, b;
-    int hp;
-    int aiType;
 };
 
-#define MAX_ENTITIES 96
-static Entity entities[MAX_ENTITIES];
+struct RenderComponent {
+    float r, g, b;
+    int shapeType; // 0 = Box, 1 = Pyramid, 2 = Crystal
+};
+
+struct PhysicsComponent {
+    float vx, vy, vz;
+    int behavior;  // 0: Static, 1: Player, 2: Spin, 3: Patrol X, 4: Patrol Z
+    int touchRule; // 0: None, 1: Collect, 2: Hazard, 3: Win
+    float origin;
+};
+
+struct StatsComponent {
+    int hp;
+};
+
+// Главен EnTT Регистър за всички обекти в сцената
+static entt::registry gRegistry;
 
 static GLuint shaderProg = 0;
-static GLint mvpLoc = -1, colorLoc = -1, texTypeLoc = -1;
+static GLint mvpLoc = -1, colorLoc = -1;
 
 #define GRID_LINES 42
 static float gridVerts[GRID_LINES * 2 * 3];
-
-static const float ARENA_FLOOR[] = {
-    -25.0f, 0.0f, -25.0f,  0,1,0,   25.0f, 0.0f, -25.0f,  0,1,0,   25.0f, 0.0f,  25.0f,  0,1,0,
-    -25.0f, 0.0f, -25.0f,  0,1,0,   25.0f, 0.0f,  25.0f,  0,1,0,  -25.0f, 0.0f,  25.0f,  0,1,0
-};
 
 static const float CUBE[] = {
     -0.5f,-0.5f, 0.5f, 0,0,1,  0.5f,-0.5f, 0.5f, 0,0,1,  0.5f, 0.5f, 0.5f, 0,0,1,
@@ -61,29 +68,18 @@ static const char* VS =
     "layout(location=0) in vec3 aPos;\n"
     "layout(location=1) in vec3 aNorm;\n"
     "uniform mat4 uMVP;\n"
-    "out vec3 vPos;\n"
     "out vec3 vN;\n"
-    "void main(){ vPos=aPos; vN=aNorm; gl_Position=uMVP*vec4(aPos,1.0); }\n";
+    "void main(){ vN=aNorm; gl_Position=uMVP*vec4(aPos,1.0); }\n";
 
 static const char* FS =
     "#version 300 es\n"
     "precision mediump float;\n"
-    "in vec3 vPos;\n"
     "in vec3 vN;\n"
     "uniform vec3 uCol;\n"
-    "uniform int uTexType;\n"
     "out vec4 oC;\n"
     "void main(){\n"
-    "    float d = max(dot(normalize(vN), normalize(vec3(0.4,0.9,0.5))), 0.0) * 0.65 + 0.35;\n"
-    "    vec3 col = uCol;\n"
-    "    if(uTexType == 1) {\n"
-    "        vec2 grid = abs(fract(vPos.xz * 0.5) - 0.5);\n"
-    "        float lines = smoothstep(0.45, 0.49, max(grid.x, grid.y));\n"
-    "        col = mix(col, vec3(0.1, 0.1, 0.12), lines);\n"
-    "    } else if(uTexType == 2) {\n"
-    "        if(abs(vPos.y) < 0.12) col = vec3(0.1, 0.1, 0.1);\n"
-    "    }\n"
-    "    oC = vec4(col * d, 1.0);\n"
+    "    float d = max(dot(normalize(vN), normalize(vec3(0.4,0.9,0.5))), 0.0) * 0.55 + 0.45;\n"
+    "    oC = vec4(uCol * d, 1.0);\n"
     "}\n";
 
 static void mat4_identity(float* m) { for(int i=0; i<16; i++) m[i]=(i%5==0)?1.0f:0.0f; }
@@ -98,26 +94,6 @@ static void mat4_mul(float* out, const float* a, const float* b) {
     for(int i=0; i<16; i++) out[i] = t[i];
 }
 
-static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float ty, float tz, float ux, float uy, float uz) {
-    float fx = tx - ex, fy = ty - ey, fz = tz - ez;
-    float rlf = 1.0f / sqrtf(fx*fx + fy*fy + fz*fz);
-    fx *= rlf; fy *= rlf; fz *= rlf;
-
-    float rx = fy * uz - fz * uy, ry = fz * ux - fx * uz, rz = fx * uy - fy * ux;
-    float rlr = 1.0f / sqrtf(rx*rx + ry*ry + rz*rz);
-    rx *= rlr; ry *= rlr; rz *= rlr;
-
-    float ux2 = ry * fz - rz * fy, uy2 = rz * fx - rx * fz, uz2 = rx * fy - ry * fx;
-
-    m[0] = rx;  m[1] = ux2; m[2] = -fx; m[3] = 0.0f;
-    m[4] = ry;  m[5] = uy2; m[6] = -fy; m[7] = 0.0f;
-    m[8] = rz;  m[9] = uz2; m[10]= -fz; m[11]= 0.0f;
-    m[12]= -(rx*ex + ry*ey + rz*ez);
-    m[13]= -(ux2*ex + uy2*ey + uz2*ez);
-    m[14]= (fx*ex + fy*ey + fz*ez);
-    m[15]= 1.0f;
-}
-
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     GLuint vs = glCreateShader(GL_VERTEX_SHADER); glShaderSource(vs,1,&VS,nullptr); glCompileShader(vs);
@@ -127,22 +103,17 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
     glLinkProgram(shaderProg);
     mvpLoc = glGetUniformLocation(shaderProg, "uMVP");
     colorLoc = glGetUniformLocation(shaderProg, "uCol");
-    texTypeLoc = glGetUniformLocation(shaderProg, "uTexType");
     glEnable(GL_DEPTH_TEST);
 
     int idx = 0;
     for(int i=-10; i<=10; i++){
-        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.01f; gridVerts[idx++]=-10.0f;
-        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.01f; gridVerts[idx++]= 10.0f;
-        gridVerts[idx++]=-10.0f;   gridVerts[idx++]=0.01f; gridVerts[idx++]=(float)i;
-        gridVerts[idx++]= 10.0f;   gridVerts[idx++]=0.01f; gridVerts[idx++]=(float)i;
+        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.0f; gridVerts[idx++]=-10.0f;
+        gridVerts[idx++]=(float)i; gridVerts[idx++]=0.0f; gridVerts[idx++]=10.0f;
+        gridVerts[idx++]=-10.0f;   gridVerts[idx++]=0.0f; gridVerts[idx++]=(float)i;
+        gridVerts[idx++]=10.0f;    gridVerts[idx++]=0.0f; gridVerts[idx++]=(float)i;
     }
 
-    for(int i=0; i<MAX_ENTITIES; i++) entities[i].active = false;
-
-    // Шаолин боец срещу Нинджа
-    entities[0] = { true, TAG_PLAYER, 0.0f, 0.0f, 2.0f, 0,0,0, 1.0f, 1.0f, 1.0f, 0.0f, 0.95f, 0.75f, 0.1f, 100, 0 };
-    entities[1] = { true, TAG_ENEMY,  0.0f, 0.0f,-3.5f, 0,0,0, 1.0f, 1.0f, 1.0f, 0.0f, 0.55f, 0.15f, 0.75f, 80, 1 };
+    gRegistry.clear();
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -151,107 +122,64 @@ Java_com_aigame_engine_NativeEngine_onSurfaceChanged(JNIEnv*, jobject, jint w, j
     aspect = (float)w / (float)(h>0?h:1);
 }
 
-static void drawPart(float px, float py, float pz, float sx, float sy, float sz, float rotY, float r, float g, float b, int texType, const float* VP) {
-    float rad = rotY * 0.017453f;
-    float cr = cosf(rad), sr = sinf(rad);
-    float M[16], MVP[16]; mat4_identity(M);
-    M[0] = cr * sx; M[2] = sr * sx;
-    M[5] = sy;
-    M[8] = -sr * sz; M[10] = cr * sz;
-    M[12] = px; M[13] = py; M[14] = pz;
-    mat4_mul(MVP, VP, M);
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
-    glUniform3f(colorLoc, r, g, b);
-    glUniform1i(texTypeLoc, texType);
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), CUBE);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), &CUBE[3]);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
-}
-
-static void drawHumanoidFighter(const Entity& e, bool isAttacking, const float* VP) {
-    float bx = e.x, by = e.y, bz = e.z, rot = e.rotY;
-
-    // Торс с колан
-    drawPart(bx, by + 1.1f, bz, 0.75f, 0.85f, 0.45f, rot, e.r, e.g, e.b, 2, VP);
-    // Глава с лента
-    drawPart(bx, by + 1.8f, bz, 0.45f, 0.45f, 0.45f, rot, 0.95f, 0.80f, 0.65f, 0, VP);
-    drawPart(bx, by + 1.88f, bz, 0.48f, 0.12f, 0.48f, rot, e.r * 0.8f, e.g * 0.8f, e.b * 0.8f, 0, VP);
-    // Крака
-    drawPart(bx - 0.22f, by + 0.45f, bz, 0.28f, 0.85f, 0.32f, rot, 0.18f, 0.18f, 0.20f, 0, VP);
-    drawPart(bx + 0.22f, by + 0.45f, bz, 0.28f, 0.85f, 0.32f, rot, 0.18f, 0.18f, 0.20f, 0, VP);
-    // Ръце с анимация
-    float punchForward = isAttacking ? -0.85f : 0.0f;
-    drawPart(bx - 0.52f, by + 1.15f, bz + 0.15f, 0.22f, 0.75f, 0.24f, rot, e.r, e.g, e.b, 0, VP);
-    drawPart(bx + 0.52f, by + 1.15f, bz + punchForward, 0.24f, 0.24f, 0.85f, rot, e.r, e.g, e.b, 0, VP);
-}
-
+// 2. ECS СИСТЕМИ (EnTT Systems в Game Loop)
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
-    if (attackAnimTimer > 0.0f) attackAnimTimer -= 0.05f;
+    static float timeTicks = 0.0f;
+    timeTicks += 0.035f;
 
-    int pIdx = -1;
-    int activeEnemies = 0;
-    for(int i=0; i<MAX_ENTITIES; i++){
-        if(!entities[i].active) continue;
-        if(entities[i].tag == TAG_PLAYER) pIdx = i;
-        else if(entities[i].tag == TAG_ENEMY) activeEnemies++;
-    }
+    float playerX = 0.0f, playerY = 0.6f, playerZ = 0.0f;
+    bool hasPlayer = false;
 
-    // Всички живи нинджи преследват играча
-    if(pIdx >= 0) {
-        for(int i=0; i<MAX_ENTITIES; i++){
-            if(!entities[i].active) continue;
+    // Системи за физика и поведение в EnTT
+    auto physView = gRegistry.view<TransformComponent, PhysicsComponent>();
+    for(auto entity : physView) {
+        auto& t = physView.get<TransformComponent>(entity);
+        auto& p = physView.get<PhysicsComponent>(entity);
 
-            // Движение на огнени топки / куршуми
-            if(entities[i].tag == TAG_BULLET) {
-                entities[i].x += entities[i].vx;
-                entities[i].z += entities[i].vz;
-                for(int j=0; j<MAX_ENTITIES; j++){
-                    if(entities[j].active && entities[j].tag == TAG_ENEMY){
-                        float dx = entities[i].x - entities[j].x, dz = entities[i].z - entities[j].z;
-                        if(sqrtf(dx*dx + dz*dz) < 1.4f){
-                            entities[j].hp -= 40;
-                            entities[i].active = false;
-                            if(entities[j].hp <= 0){ entities[j].active = false; gameScore += 100; }
-                            break;
-                        }
-                    }
-                }
-            }
-            // AI на нинджите
-            else if(entities[i].tag == TAG_ENEMY) {
-                float dx = entities[pIdx].x - entities[i].x;
-                float dz = entities[pIdx].z - entities[i].z;
-                float dist = sqrtf(dx*dx + dz*dz);
-                if(dist > 1.6f) {
-                    entities[i].x += (dx / dist) * 0.045f;
-                    entities[i].z += (dz / dist) * 0.045f;
-                } else {
-                    static int atkCd = 0;
-                    if(++atkCd > 30) {
-                        atkCd = 0;
-                        playerHp -= 10;
-                        if(playerHp <= 0) { playerHp = playerMaxHp; entities[pIdx].x = pStartX; entities[pIdx].z = pStartZ; }
-                    }
-                }
-            }
+        if(p.behavior == 1) { // PLAYER
+            playerX = t.x; playerY = t.y; playerZ = t.z;
+            hasPlayer = true;
+        } else if(p.behavior == 2) { // SPIN (Монети/Диаманти)
+            t.rotY += 3.5f;
+        } else if(p.behavior == 3) { // PATROL X
+            t.x = p.origin + sinf(timeTicks) * 3.0f;
+        } else if(p.behavior == 4) { // PATROL Z
+            t.z = p.origin + sinf(timeTicks) * 3.0f;
         }
     }
 
-    // Проверка за победа: ако няма живи нинджи
-    if(activeEnemies == 0 && gameScore > 0) {
-        gameWon = true;
-    }
+    // Камера и колизии на играча
+    if(hasPlayer) {
+        camX = playerX;
+        camY = playerY + 4.8f;
+        camZ = playerZ + 8.5f;
 
-    float targetX = 0.0f, targetY = 1.2f, targetZ = 0.0f;
-    if(pIdx >= 0) {
-        targetX = entities[pIdx].x;
-        targetY = entities[pIdx].y + 1.0f;
-        targetZ = entities[pIdx].z;
-        camX = targetX;
-        camY = targetY + 5.5f;
-        camZ = targetZ + 9.5f;
+        for(auto entity : physView) {
+            auto& t = physView.get<TransformComponent>(entity);
+            auto& p = physView.get<PhysicsComponent>(entity);
+            if(p.behavior == 1) continue;
+
+            float dx = playerX - t.x, dy = playerY - t.y, dz = playerZ - t.z;
+            float dist = sqrtf(dx*dx + dy*dy + dz*dz);
+            if(dist < (1.2f + t.sx) * 0.45f) {
+                if(p.touchRule == 1) { // COLLECT
+                    gRegistry.destroy(entity);
+                    gameScore++;
+                } else if(p.touchRule == 2) { // HAZARD
+                    auto pView = gRegistry.view<TransformComponent, PhysicsComponent>();
+                    for(auto pe : pView) {
+                        if(pView.get<PhysicsComponent>(pe).behavior == 1) {
+                            pView.get<TransformComponent>(pe).x = pStartX;
+                            pView.get<TransformComponent>(pe).y = pStartY;
+                            pView.get<TransformComponent>(pe).z = pStartZ;
+                        }
+                    }
+                } else if(p.touchRule == 3) { // WIN
+                    gameWon = true;
+                }
+            }
+        }
     }
 
     glClearColor(bgR, bgG, bgB, 1.0f);
@@ -263,124 +191,112 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     P[0] = 1.0f / (aspect * tanHalf); P[5] = 1.0f / tanHalf;
     P[10] = -100.1f / 99.9f; P[11] = -1.0f; P[14] = -20.0f / 99.9f; P[15] = 0.0f;
 
-    float V[16];
-    mat4_lookat(V, camX, camY, camZ, targetX, targetY, targetZ, 0.0f, 1.0f, 0.0f);
+    float V[16]; mat4_identity(V);
+    float pitch = -0.32f;
+    float cp = cosf(pitch), sp = sinf(pitch);
+    V[0]=1.0f; V[5]=cp; V[6]=sp; V[9]=-sp; V[10]=cp;
+    V[12]=-camX; V[13]=-(cp*camY - sp*camZ); V[14]=-(sp*camY + cp*camZ);
 
     float VP[16]; mat4_mul(VP, P, V);
     glUseProgram(shaderProg);
-    glEnable(GL_DEPTH_TEST);
+
+    // Под
+    float gM[16], gMVP[16]; mat4_identity(gM); mat4_mul(gMVP, VP, gM);
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, gMVP);
+    glUniform3f(colorLoc, 0.30f, 0.35f, 0.42f);
     glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, gridVerts);
+    glDrawArrays(GL_LINES, 0, GRID_LINES * 2);
+
+    // EnTT Рендър система: чертае всички активни обекти
     glEnableVertexAttribArray(1);
+    auto renderView = gRegistry.view<TransformComponent, RenderComponent>();
+    for(auto entity : renderView) {
+        auto& t = renderView.get<TransformComponent>(entity);
+        auto& r = renderView.get<RenderComponent>(entity);
 
-    // Каменна арена
-    float floorM[16], floorMVP[16];
-    mat4_identity(floorM); mat4_mul(floorMVP, VP, floorM);
-    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, floorMVP);
-    glUniform3f(colorLoc, 0.28f, 0.26f, 0.32f);
-    glUniform1i(texTypeLoc, 1);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), ARENA_FLOOR);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), &ARENA_FLOOR[3]);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+        float rad = t.rotY * 0.017453f;
+        float cr = cosf(rad), sr = sinf(rad);
+        float M[16], MVP[16]; mat4_identity(M);
+        M[0] = cr * t.sx; M[2] = sr * t.sx;
+        M[5] = t.sy;
+        M[8] = -sr * t.sz; M[10] = cr * t.sz;
+        M[12] = t.x; M[13] = t.y; M[14] = t.z;
 
-    // Рендиране на бойци и снаряди
-    for(int i=0; i<MAX_ENTITIES; i++){
-        if(!entities[i].active) continue;
-
-        if(entities[i].tag == TAG_PLAYER || entities[i].tag == TAG_ENEMY) {
-            bool isAtk = (entities[i].tag == TAG_PLAYER && attackAnimTimer > 0.0f);
-            drawHumanoidFighter(entities[i], isAtk, VP);
-        } else {
-            drawPart(entities[i].x, entities[i].y, entities[i].z,
-                     entities[i].sx, entities[i].sy, entities[i].sz, entities[i].rotY,
-                     entities[i].r, entities[i].g, entities[i].b, 0, VP);
-        }
+        mat4_mul(MVP, VP, M);
+        glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, MVP);
+        glUniform3f(colorLoc, r.r, r.g, r.b);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), CUBE);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), &CUBE[3]);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
     }
-
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
 }
 
-// МОМЕНТАЛЕН РЕСТАРТ
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_restartGame(JNIEnv*, jobject) {
-    playerHp = playerMaxHp;
-    gameScore = 0;
-    gameWon = false;
-    for(int i=0; i<MAX_ENTITIES; i++){
-        if(entities[i].tag == TAG_PLAYER) {
-            entities[i].active = true;
-            entities[i].x = pStartX; entities[i].y = pStartY; entities[i].z = pStartZ;
-            entities[i].hp = playerMaxHp;
-        } else if(entities[i].tag == TAG_ENEMY) {
-            entities[i].active = true;
-            entities[i].x = ((float)(rand() % 8) - 4.0f);
-            entities[i].y = 0.0f;
-            entities[i].z = -((float)(rand() % 5) + 3.0f);
-            entities[i].hp = 80;
+// 3. nlohmann/json Световен парсър за генерирани от AI сцени
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aigame_engine_NativeEngine_loadSceneJson(JNIEnv* env, jobject, jstring jsonStr) {
+    const char* str = env->GetStringUTFChars(jsonStr, nullptr);
+    std::string s(str);
+    env->ReleaseStringUTFChars(jsonStr, str);
+
+    try {
+        auto j = json::parse(s);
+        gRegistry.clear();
+        gameScore = 0;
+        gameWon = false;
+
+        if (j.contains("sky") && j["sky"].is_array() && j["sky"].size() >= 3) {
+            bgR = j["sky"][0]; bgG = j["sky"][1]; bgB = j["sky"][2];
         }
-    }
-}
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_triggerAction(JNIEnv*, jobject, jint actionType) {
-    int pIdx = -1;
-    for(int i=0; i<MAX_ENTITIES; i++){
-        if(entities[i].active && entities[i].tag == TAG_PLAYER){ pIdx = i; break; }
-    }
-    if(pIdx < 0) return;
+        if (j.contains("entities") && j["entities"].is_array()) {
+            for (const auto& item : j["entities"]) {
+                auto e = gRegistry.create();
 
-    attackAnimTimer = 0.25f;
+                float x = item.value("pos", std::vector<float>{0,0,0})[0];
+                float y = item.value("pos", std::vector<float>{0,0,0})[1];
+                float z = item.value("pos", std::vector<float>{0,0,0})[2];
 
-    float px = entities[pIdx].x, pz = entities[pIdx].z;
+                float sx = item.value("scale", std::vector<float>{1,1,1})[0];
+                float sy = item.value("scale", std::vector<float>{1,1,1})[1];
+                float sz = item.value("scale", std::vector<float>{1,1,1})[2];
 
-    // Удар в обсег
-    if(actionType == 1) {
-        for(int i=0; i<MAX_ENTITIES; i++){
-            if(!entities[i].active || entities[i].tag != TAG_ENEMY) continue;
-            float dx = entities[i].x - px, dz = entities[i].z - pz;
-            float dist = sqrtf(dx*dx + dz*dz);
-            if(dist < 2.8f){
-                entities[i].hp -= 35;
-                if(dist > 0.05f) {
-                    entities[i].x += (dx / dist) * 1.8f;
-                    entities[i].z += (dz / dist) * 1.8f;
+                float rot = item.value("rot", 0.0f);
+                float cr = item.value("color", std::vector<float>{0.8f,0.8f,0.8f})[0];
+                float cg = item.value("color", std::vector<float>{0.8f,0.8f,0.8f})[1];
+                float cb = item.value("color", std::vector<float>{0.8f,0.8f,0.8f})[2];
+
+                int shape = item.value("shape", 0);
+                int behavior = item.value("behavior", 0);
+                int touch = item.value("touch", 0);
+                int hp = item.value("hp", 100);
+
+                gRegistry.emplace<TransformComponent>(e, x, y, z, sx, sy, sz, rot);
+                gRegistry.emplace<RenderComponent>(e, cr, cg, cb, shape);
+                gRegistry.emplace<PhysicsComponent>(e, 0.0f, 0.0f, 0.0f, behavior, touch, (behavior == 3 ? x : z));
+                gRegistry.emplace<StatsComponent>(e, hp);
+
+                if (behavior == 1) { // PLAYER START
+                    pStartX = x; pStartY = y; pStartZ = z;
                 }
-                if(entities[i].hp <= 0){ entities[i].active = false; gameScore += 100; }
             }
         }
-    }
-    // Огън / Снаряд (Fireball / Нунчаку спец)
-    else if(actionType == 2) {
-        for(int i=0; i<MAX_ENTITIES; i++){
-            if(!entities[i].active){
-                entities[i] = { true, TAG_BULLET, entities[pIdx].x, entities[pIdx].y + 1.1f, entities[pIdx].z - 0.8f,
-                                0.0f, 0.0f, -0.45f, 0.45f, 0.45f, 0.45f, 0.0f, 1.0f, 0.45f, 0.1f, 1, 3 };
-                break;
-            }
-        }
+        return JNI_TRUE;
+    } catch (...) {
+        return JNI_FALSE;
     }
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_movePlayer(JNIEnv*, jobject, jfloat f, jfloat s) {
-    for(int i=0; i<MAX_ENTITIES; i++){
-        if(entities[i].active && entities[i].tag == TAG_PLAYER){
-            float speed = 0.28f;
-            entities[i].z -= f * speed;
-            entities[i].x += s * speed;
-            break;
-        }
-    }
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_spawnEntity(JNIEnv*, jobject,
-        jfloat x, jfloat y, jfloat z, jfloat sx, jfloat sy, jfloat sz,
-        jfloat r, jfloat g, jfloat b, jint tag, jint hp, jint aiType) {
-    for(int i=0; i<MAX_ENTITIES; i++){
-        if(!entities[i].active){
-            entities[i] = { true, tag, x, y, z, 0.0f, 0.0f, 0.0f, sx, sy, sz, 0.0f, r, g, b, hp, aiType };
-            if(tag == TAG_PLAYER){ pStartX = x; pStartY = y; pStartZ = z; playerHp = hp; playerMaxHp = hp; }
+    auto view = gRegistry.view<TransformComponent, PhysicsComponent>();
+    for(auto entity : view) {
+        if(view.get<PhysicsComponent>(entity).behavior == 1) {
+            auto& t = view.get<TransformComponent>(entity);
+            t.z -= f * 0.28f;
+            t.x += s * 0.28f;
             break;
         }
     }
@@ -388,15 +304,9 @@ Java_com_aigame_engine_NativeEngine_spawnEntity(JNIEnv*, jobject,
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_clearWorld(JNIEnv*, jobject) {
-    for(int i=0; i<MAX_ENTITIES; i++) entities[i].active = false;
-    playerHp = 100; gameScore = 0; gameWon = false;
+    gRegistry.clear();
+    gameScore = 0; gameWon = false;
 }
 
-extern "C" JNIEXPORT jint JNICALL Java_com_aigame_engine_NativeEngine_getPlayerHp(JNIEnv*, jobject) { return playerHp; }
 extern "C" JNIEXPORT jint JNICALL Java_com_aigame_engine_NativeEngine_getScore(JNIEnv*, jobject) { return gameScore; }
 extern "C" JNIEXPORT jboolean JNICALL Java_com_aigame_engine_NativeEngine_isWon(JNIEnv*, jobject) { return gameWon; }
-
-extern "C" JNIEXPORT void JNICALL
-Java_com_aigame_engine_NativeEngine_setSky(JNIEnv*, jobject, jfloat r, jfloat g, jfloat b) {
-    bgR = r; bgG = g; bgB = b;
-}

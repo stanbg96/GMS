@@ -15,17 +15,15 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var glSurfaceView: GLSurfaceView
-    private lateinit var tvHp: TextView
     private lateinit var tvScore: TextView
     private lateinit var tvGameGoal: TextView
     private lateinit var tvWinBanner: TextView
     private lateinit var joystickView: JoystickView
-    private lateinit var btnActionA: Button
-    private lateinit var btnActionB: Button
     private lateinit var prefs: SharedPreferences
 
     private val messages = mutableListOf<ChatMessage>()
@@ -33,8 +31,6 @@ class MainActivity : AppCompatActivity() {
 
     private var forwardInput = 0f
     private var strafeInput = 0f
-    private var actionAType = 1
-    private var actionBType = 1
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,31 +43,24 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
-        tvHp = findViewById(R.id.tv_hp)
         tvScore = findViewById(R.id.tv_score)
         tvGameGoal = findViewById(R.id.tv_game_goal)
         tvWinBanner = findViewById(R.id.tv_win_banner)
         joystickView = findViewById(R.id.joystick_view)
-        btnActionA = findViewById(R.id.btn_action_a)
-        btnActionB = findViewById(R.id.btn_action_b)
 
+        // Джойстик управление
         joystickView.onJoystickMove = { f, s ->
             forwardInput = f
             strafeInput = s
         }
 
-        btnActionA.setOnClickListener { NativeEngine.triggerAction(actionAType) }
-        btnActionB.setOnClickListener { NativeEngine.triggerAction(actionBType) }
-
-        // 60 FPS геймплей лууп
+        // 60 FPS геймплей цикъл
         lifecycleScope.launch {
             while (true) {
                 if (forwardInput != 0f || strafeInput != 0f) {
                     NativeEngine.movePlayer(forwardInput, strafeInput)
                 }
-                val hp = NativeEngine.getPlayerHp()
                 val score = NativeEngine.getScore()
-                tvHp.text = "❤️ $hp HP"
                 tvScore.text = "💎 $score"
 
                 if (NativeEngine.isWon()) {
@@ -83,6 +72,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Чат конзола
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -92,7 +82,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("GMS Live Engine е готов. Напиши какво да се случи или рестарт!", false)
+        addMessage("EnTT ECS Двигател готов. Опиши каква игра или сцена да построя!", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
@@ -103,15 +93,13 @@ class MainActivity : AppCompatActivity() {
             addMessage(text, true)
             chatInput.text.clear()
 
-            // СВЕТКАВИЧЕН РЕСТАРТ: ако напишеш 'рестарт', занулява веднага без чакане на интернет!
+            // Светкавичен рестарт без интернет
             val lower = text.lowercase().trim()
-            if (lower == "рестарт" || lower == "рестартирай" || lower == "рестартирай играта" ||
-                lower == "пак" || lower == "отново" || lower == "нова игра") {
-                NativeEngine.restartGame()
+            if (lower == "рестарт" || lower == "рестартирай" || lower == "restart" || lower == "пак" || lower == "отново") {
+                NativeEngine.clearWorld()
                 tvWinBanner.visibility = View.GONE
-                tvHp.text = "❤️ 100 HP"
                 tvScore.text = "💎 0"
-                addMessage("Играта е рестартирана мигновено!", false)
+                addMessage("Сцената е рестартирана!", false)
                 return@setOnClickListener
             }
 
@@ -124,14 +112,14 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            addMessage("Модифицирам играта на живо...", false)
+            addMessage("Генерирам 3D сцена през EnTT ECS...", false)
             val loadingIndex = messages.size - 1
 
             lifecycleScope.launch {
                 val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                val cleanReply = parseAndApplyGameCommands(rawReply)
+                val cleanDescription = parseAndLoadScene(rawReply)
 
-                messages[loadingIndex] = ChatMessage(cleanReply, false)
+                messages[loadingIndex] = ChatMessage(cleanDescription, false)
                 adapter.notifyItemChanged(loadingIndex)
                 chatRecycler.scrollToPosition(loadingIndex)
             }
@@ -144,57 +132,32 @@ class MainActivity : AppCompatActivity() {
         findViewById<RecyclerView>(R.id.chat_recycler)?.scrollToPosition(messages.size - 1)
     }
 
-    private fun parseAndApplyGameCommands(reply: String): String {
-        val regex = Regex("\\[(?:CMD:)?([A-Za-zА-Яа-я_]+)(?::([^\\]]+))?\\]")
-        val matches = regex.findAll(reply)
+    private fun parseAndLoadScene(reply: String): String {
+        val startIdx = reply.indexOf('{')
+        val endIdx = reply.lastIndexOf('}')
 
-        for (match in matches) {
-            val cmd = match.groupValues[1].uppercase()
-            val rawValue = match.groupValues[2]
+        if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+            val jsonStr = reply.substring(startIdx, endIdx + 1)
+            val loaded = NativeEngine.loadSceneJson(jsonStr)
 
-            try {
-                when (cmd) {
-                    "RESTART", "РЕСТАРТ" -> {
-                        NativeEngine.restartGame()
-                        tvWinBanner.visibility = View.GONE
+            if (loaded) {
+                try {
+                    val obj = JSONObject(jsonStr)
+                    if (obj.has("goal")) {
+                        tvGameGoal.text = obj.getString("goal")
                     }
-                    "CLEAR", "ИЗЧИСТИ" -> NativeEngine.clearWorld()
-                    "SKY", "НЕБЕ" -> {
-                        val rgb = rawValue.split(",").map { it.trim().toFloat() }
-                        if (rgb.size == 3) NativeEngine.setSky(rgb[0], rgb[1], rgb[2])
-                    }
-                    "GOAL", "ЦЕЛ" -> {
-                        tvGameGoal.text = rawValue
-                    }
-                    "BTNS", "БУТОНИ" -> {
-                        val parts = rawValue.split(",")
-                        if (parts.size >= 4) {
-                            btnActionA.text = parts[0].trim()
-                            actionAType = parts[1].trim().toInt()
-                            btnActionB.text = parts[2].trim()
-                            actionBType = parts[3].trim().toInt()
-                        }
-                    }
-                    "SPAWN", "СПАУН" -> {
-                        val numRegex = Regex("[-+]?\\d*\\.?\\d+")
-                        val n = numRegex.findAll(rawValue).map { it.value.toFloat() }.toList()
-
-                        if (n.size >= 12) {
-                            var r = n[6]; var g = n[7]; var b = n[8]
-                            if (r > 1.0f) r /= 255f; if (g > 1.0f) g /= 255f; if (b > 1.0f) b /= 255f
-                            val tag = n[9].toInt()
-                            val hp = n[10].toInt()
-                            val ai = n[11].toInt()
-                            NativeEngine.spawnEntity(n[0], n[1], n[2], n[3], n[4], n[5], r, g, b, tag, hp, ai)
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+                } catch (_: Exception) {}
             }
+
+            val textOnly = (reply.substring(0, startIdx) + reply.substring(endIdx + 1))
+                .replace("```json", "")
+                .replace("```", "")
+                .trim()
+
+            return if (textOnly.isNotEmpty()) textOnly else "3D сцената е заредена успешно!"
         }
 
-        return reply.replace(regex, "").trim()
+        return reply
     }
 
     private fun showAiCloudDialog() {
