@@ -51,21 +51,26 @@ object AiCloudManager {
     suspend fun generateResponse(provider: String, apiKey: String, model: String, prompt: String): String = withContext(Dispatchers.IO) {
         try {
             val sysPrompt = 
-                "Ти си главен 3D Scene Architect за C++ EnTT Game Engine. " +
-                "Потребителят ти описва игра или 3D сцена. Твоята задача е да отговориш с точно 1 кратко изречение на български и ВЕДНАГА да върнеш валиден JSON блок в следния формат:\n" +
+                "Ти си AI 3D Scene Architect за GMS EnTT Game Engine. Генерираш сцени директно в JSON формат.\n" +
+                "ПРАВИЛО: Отговори с точно 1 кратко изречение на български и след това добави сцената, оградена точно между таговете [SCENE_START] и [SCENE_END]!\n\n" +
+                "ФОРМАТ НА JSON:\n" +
                 "{\n" +
-                "  \"sky\": [0.15, 0.18, 0.24],\n" +
-                "  \"goal\": \"Събери кристалите и стигни финала!\",\n" +
+                "  \"sky\": [r, g, b],\n" +
                 "  \"entities\": [\n" +
-                "    {\"pos\": [0.0, 0.7, 0.0], \"scale\": [1.2, 1.2, 1.2], \"color\": [0.95, 0.75, 0.1], \"behavior\": 1, \"touch\": 0, \"hp\": 100},\n" +
-                "    {\"pos\": [0.0, 0.7, -6.0], \"scale\": [0.8, 0.8, 0.8], \"color\": [0.2, 0.85, 1.0], \"behavior\": 2, \"touch\": 1},\n" +
-                "    {\"pos\": [0.0, 0.7, -12.0], \"scale\": [3.0, 2.5, 0.6], \"color\": [0.2, 0.9, 0.3], \"behavior\": 0, \"touch\": 3}\n" +
+                "    {\n" +
+                "      \"pos\": [x, y, z],\n" +
+                "      \"scale\": [sx, sy, sz],\n" +
+                "      \"rot\": rotY,\n" +
+                "      \"color\": [r, g, b],\n" +
+                "      \"shape\": 0,\n" +
+                "      \"behavior\": 0,\n" +
+                "      \"touch\": 0,\n" +
+                "      \"hp\": 100\n" +
+                "    }\n" +
                 "  ]\n" +
                 "}\n" +
-                "ПРАВИЛА ЗА ПАРАМЕТРИТЕ:\n" +
-                "- behavior: 0=STATIC (под/платформа/стена), 1=PLAYER (точно 1 играч, управляван с джойстик), 2=SPIN (диамант/бонус), 3=PATROL_X (патрулира по X), 4=PATROL_Z (патрулира по Z)\n" +
-                "- touch: 0=NONE (твърд обект), 1=COLLECT (+1 точка в брояча), 2=HAZARD (лава/капан, рестартира играча), 3=WIN (финална порта, победа)\n" +
-                "- Всички цветове са десетични числа от 0.0 до 1.0. Винаги спазвай валиден синтаксис на JSON!"
+                "behavior: 0=Static (земя/стена/препятствие), 1=Player (играчът с джойстик, задължително 1 брой), 2=Spin (въртящ се бонус), 3=PatrolX, 4=PatrolZ.\n" +
+                "touch: 0=None, 1=Collect (+1 точка), 2=Hazard (рестарт при допир), 3=Win (победа)."
 
             val request: Request = when (provider) {
                 "OpenRouter", "OpenAI" -> {
@@ -111,7 +116,7 @@ object AiCloudManager {
                     val endpoint = "https://api.anthropic.com/v1/messages"
                     val jsonBody = JSONObject().apply {
                         put("model", model)
-                        put("max_tokens", 1024)
+                        put("max_tokens", 2048)
                         put("system", sysPrompt)
                         val msgs = JSONArray().apply {
                             put(JSONObject().apply { put("role", "user"); put("content", prompt) })
