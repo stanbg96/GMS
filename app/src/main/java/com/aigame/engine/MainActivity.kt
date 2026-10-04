@@ -19,8 +19,8 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var glSurfaceView: GLSurfaceView
+    private lateinit var tvHp: TextView
     private lateinit var tvScore: TextView
-    private lateinit var tvGameGoal: TextView
     private lateinit var tvWinBanner: TextView
     private lateinit var joystickView: JoystickView
     private lateinit var prefs: SharedPreferences
@@ -42,8 +42,8 @@ class MainActivity : AppCompatActivity() {
         glSurfaceView.setEGLContextClientVersion(3)
         glSurfaceView.setRenderer(EngineRenderer())
 
+        tvHp = findViewById(R.id.tv_hp)
         tvScore = findViewById(R.id.tv_score)
-        tvGameGoal = findViewById(R.id.tv_game_goal)
         tvWinBanner = findViewById(R.id.tv_win_banner)
         joystickView = findViewById(R.id.joystick_view)
 
@@ -52,14 +52,19 @@ class MainActivity : AppCompatActivity() {
             strafeInput = s
         }
 
-        // 60 FPS геймплей цикъл
+        // 1=ЮМРУК, 2=РИТНИК, 3=СКОК
+        findViewById<Button>(R.id.btn_punch).setOnClickListener { NativeEngine.triggerAction(1) }
+        findViewById<Button>(R.id.btn_kick).setOnClickListener { NativeEngine.triggerAction(2) }
+        findViewById<Button>(R.id.btn_jump).setOnClickListener { NativeEngine.triggerAction(3) }
+
+        // 60 FPS геймплей лууп
         lifecycleScope.launch {
             while (true) {
                 if (forwardInput != 0f || strafeInput != 0f) {
                     NativeEngine.movePlayer(forwardInput, strafeInput)
                 }
-                val score = NativeEngine.getScore()
-                tvScore.text = "💎 Точки: $score"
+                tvHp.text = "❤️ ${NativeEngine.getPlayerHp()} HP"
+                tvScore.text = "💎 ${NativeEngine.getScore()}"
 
                 if (NativeEngine.isWon()) {
                     tvWinBanner.visibility = View.VISIBLE
@@ -70,6 +75,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Чат конзола
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -79,7 +85,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("GMS EnTT Engine е готов. Опиши какъв 3D свят или игра да генерирам!", false)
+        addMessage("Бойната арена е готова! Ползвай джойстика, УДАР, РИТНИК и СКОК.", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
@@ -90,13 +96,14 @@ class MainActivity : AppCompatActivity() {
             addMessage(text, true)
             chatInput.text.clear()
 
-            // Бърз локален рестарт
+            // Светкавичен рестарт при написване на "рестарт"
             val lower = text.lowercase().trim()
-            if (lower == "рестарт" || lower == "изчисти" || lower == "clear") {
-                NativeEngine.clearWorld()
+            if (lower == "рестарт" || lower == "рестартирай" || lower == "пак" || lower == "отново") {
+                NativeEngine.restartGame()
                 tvWinBanner.visibility = View.GONE
-                tvScore.text = "💎 Точки: 0"
-                addMessage("Сцената е изчистена!", false)
+                tvHp.text = "❤️ 100 HP"
+                tvScore.text = "💎 0"
+                addMessage("Битката е рестартирана мигновено!", false)
                 return@setOnClickListener
             }
 
@@ -109,14 +116,12 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            addMessage("Генерирам EnTT 3D сцена през JSON...", false)
+            addMessage("...", false)
             val loadingIndex = messages.size - 1
 
             lifecycleScope.launch {
-                val rawReply = AiCloudManager.generateResponse(provider, key, model, text)
-                val cleanReply = parseAndLoadJsonScene(rawReply)
-
-                messages[loadingIndex] = ChatMessage(cleanReply, false)
+                val reply = AiCloudManager.generateResponse(provider, key, model, text)
+                messages[loadingIndex] = ChatMessage(reply, false)
                 adapter.notifyItemChanged(loadingIndex)
                 chatRecycler.scrollToPosition(loadingIndex)
             }
@@ -127,25 +132,6 @@ class MainActivity : AppCompatActivity() {
         messages.add(ChatMessage(text, isUser))
         adapter.notifyItemInserted(messages.size - 1)
         findViewById<RecyclerView>(R.id.chat_recycler)?.scrollToPosition(messages.size - 1)
-    }
-
-    private fun parseAndLoadJsonScene(reply: String): String {
-        val regex = Regex("\\[SCENE_START\\]([\\s\\S]*?)\\[SCENE_END\\]")
-        val match = regex.find(reply)
-
-        if (match != null) {
-            val jsonStr = match.groupValues[1].trim()
-            val success = NativeEngine.loadSceneJson(jsonStr)
-            val displayText = reply.replace(regex, "").trim()
-
-            return if (success) {
-                "$displayText\n\n✅ 3D светът е генериран успешно в EnTT ECS!"
-            } else {
-                "$displayText\n\n⚠️ Грешка при зареждане на JSON сцената в C++."
-            }
-        }
-
-        return reply
     }
 
     private fun showAiCloudDialog() {

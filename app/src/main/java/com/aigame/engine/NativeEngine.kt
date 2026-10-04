@@ -9,11 +9,11 @@ object NativeEngine {
     external fun onSurfaceChanged(width: Int, height: Int)
     external fun onDrawFrame()
 
-    external fun loadSceneJson(jsonStr: String): Boolean
-    external fun movePlayer(forwardInput: Float, strafeInput: Float)
+    // 1=Юмрук, 2=Ритник, 3=Скок
     external fun triggerAction(actionType: Int)
+    external fun movePlayer(forwardInput: Float, strafeInput: Float)
+    external fun restartGame()
     external fun getPlayerHp(): Int
     external fun getScore(): Int
     external fun isWon(): Boolean
-    external fun clearWorld()
 }
