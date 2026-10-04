@@ -3,16 +3,16 @@
 #include <cmath>
 #include <vector>
 
-static float bgR = 0.12f, bgG = 0.10f, bgB = 0.16f;
+static float bgR = 0.14f, bgG = 0.10f, bgB = 0.16f; // Тъмно Шаолинско небе
 static float aspect = 1.0f;
-static float camX = 0.0f, camY = 5.5f, camZ = 10.0f;
+static float camX = 0.0f, camY = 5.2f, camZ = 9.5f;
 
 static int playerHp = 100, playerMaxHp = 100;
 static int gameScore = 0;
 static bool gameWon = false;
 
-// Позиция и скок на играча
-static float playerX = 0.0f, playerY = 0.0f, playerZ = 2.0f;
+// Позиция и скок
+static float playerX = 0.0f, playerY = 0.0f, playerZ = 1.5f;
 static float playerVY = 0.0f;
 static bool isGrounded = true;
 
@@ -21,8 +21,8 @@ static float punchTimer = 0.0f;
 static float kickTimer = 0.0f;
 static float enemyHitTimer = 0.0f;
 
-// Враг
-static float enemyX = 0.0f, enemyY = 0.0f, enemyZ = -3.5f;
+// Враг Нинджа
+static float enemyX = 0.0f, enemyY = 0.0f, enemyZ = -3.2f;
 static int enemyHp = 80;
 static bool enemyActive = true;
 
@@ -41,8 +41,8 @@ static GLint mvpLoc = -1, eyePosLoc = -1;
 static float gridVerts[GRID_LINES * 2 * 3];
 
 static const float ARENA_FLOOR[] = {
-    -25.0f, 0.0f, -25.0f,  0,1,0,   25.0f, 0.0f, -25.0f,  0,1,0,   25.0f, 0.0f,  25.0f,  0,1,0,
-    -25.0f, 0.0f, -25.0f,  0,1,0,   25.0f, 0.0f,  25.0f,  0,1,0,  -25.0f, 0.0f,  25.0f,  0,1,0
+    -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,
+    -20.0f, 0.0f, -20.0f,  0,1,0,   20.0f, 0.0f,  20.0f,  0,1,0,  -20.0f, 0.0f,  20.0f,  0,1,0
 };
 
 static const char* VS =
@@ -71,11 +71,11 @@ static const char* FS =
     "out vec4 FragColor;\n"
     "void main(){\n"
     "    vec3 N = normalize(vNormal);\n"
-    "    vec3 L = normalize(vec3(0.4, 0.9, 0.5));\n"
+    "    vec3 L = normalize(vec3(0.3, 0.9, 0.6));\n"
     "    vec3 V = normalize(uEyePos - vWorldPos);\n"
     "    vec3 H = normalize(L + V);\n"
-    "    float diff = max(dot(N, L), 0.0) * 0.60 + 0.40;\n"
-    "    float spec = pow(max(dot(N, H), 0.0), 24.0) * 0.35;\n"
+    "    float diff = max(dot(N, L), 0.0) * 0.65 + 0.35;\n"
+    "    float spec = pow(max(dot(N, H), 0.0), 24.0) * 0.40;\n"
     "    FragColor = vec4(vColor * diff + vec3(spec), 1.0);\n"
     "}\n";
 
@@ -111,7 +111,6 @@ static void mat4_lookat(float* m, float ex, float ey, float ez, float tx, float 
     m[15]= 1.0f;
 }
 
-// 1. ГЛАДКО ЗAOБЛЕН КРАЙНИК (ОБЪЛ ЦИЛИНДЪР СЪС СГЪВКА)
 static void addSmoothLimb(float x1, float y1, float z1, float x2, float y2, float z2, float radius, float r, float g, float b) {
     float dx = x2 - x1, dy = y2 - y1, dz = z2 - z1;
     float len = sqrtf(dx*dx + dy*dy + dz*dz);
@@ -124,9 +123,7 @@ static void addSmoothLimb(float x1, float y1, float z1, float x2, float y2, floa
     float ulen = sqrtf(ux*ux + uz*uz);
     ux /= ulen; uz /= ulen;
 
-    float vx = wy * uz - wz * uy;
-    float vy = wz * ux - wx * uz;
-    float vz = wx * uy - wy * ux;
+    float vx = wy * uz - wz * uy, vy = wz * ux - wx * uz, vz = wx * uy - wy * ux;
 
     const int segs = 8;
     for (int i = 0; i < segs; i++) {
@@ -151,7 +148,6 @@ static void addSmoothLimb(float x1, float y1, float z1, float x2, float y2, floa
     }
 }
 
-// 2. ИСТИНСКА КРЪГЛА 3D ГЛАВА (ГЛАДКА СФЕРА БЕЗ КУТИИ)
 static void addSmoothSphere(float cx, float cy, float cz, float rad, float r, float g, float b) {
     const int rings = 6, sectors = 8;
     for (int i = 0; i < rings; i++) {
@@ -179,40 +175,65 @@ static void addSmoothSphere(float cx, float cy, float cz, float rad, float r, fl
     }
 }
 
-// 3. СГЛОБЯВАНЕ НА ОРГАНИЧЕН 3D БОЕЦ (ГЛАВА, МУСКУЛЕСТ ТОРС, ОБЛИ КРАКА И РЪЦЕ)
 static void drawOrganicFighter(float bx, float by, float bz, float r, float g, float b, bool isPunching, bool isKicking, bool isHurt) {
-    float tiltZ = isHurt ? 0.45f : 0.0f; // При удар се накланя назад
+    float tiltZ = isHurt ? 0.45f : 0.0f;
 
-    // Кръгла глава
-    addSmoothSphere(bx, by + 1.85f, bz + tiltZ, 0.28f, 0.92f, 0.78f, 0.65f); // Лице
-    addSmoothLimb(bx - 0.26f, by + 1.95f, bz + tiltZ, bx + 0.26f, by + 1.95f, bz + tiltZ, 0.08f, r * 0.8f, g * 0.8f, b * 0.8f); // Бойна лента
+    // Глава с лента
+    addSmoothSphere(bx, by + 1.85f, bz + tiltZ, 0.28f, 0.92f, 0.78f, 0.65f);
+    addSmoothLimb(bx - 0.26f, by + 1.95f, bz + tiltZ, bx + 0.26f, by + 1.95f, bz + tiltZ, 0.08f, r * 0.8f, g * 0.8f, b * 0.8f);
 
-    // Мускулест заоблен торс (от раменете до кръста)
-    addSmoothLimb(bx, by + 0.95f, bz + tiltZ, bx, by + 1.55f, bz + tiltZ, 0.36f, r, g, b); // Кимоно
-    addSmoothLimb(bx - 0.32f, by + 0.95f, bz + tiltZ, bx + 0.32f, by + 0.95f, bz + tiltZ, 0.12f, 0.1f, 0.1f, 0.1f); // Черен колан
+    // Торс с колан
+    addSmoothLimb(bx, by + 0.95f, bz + tiltZ, bx, by + 1.55f, bz + tiltZ, 0.36f, r, g, b);
+    addSmoothLimb(bx - 0.32f, by + 0.95f, bz + tiltZ, bx + 0.32f, by + 0.95f, bz + tiltZ, 0.12f, 0.1f, 0.1f, 0.1f);
 
-    // Ляв опорен крак
+    // Крака (при ритник десният крак се вдига хоризонтално напред)
     addSmoothLimb(bx - 0.20f, by + 0.90f, bz, bx - 0.20f, by + 0.08f, bz, 0.14f, 0.20f, 0.20f, 0.22f);
-
-    // ДЕСЕН КРАК: При РИТНИК се вдига на 85 градуса напред!
     if (isKicking) {
-        // ИСТИНСКИ БОЕН РИТНИК (Тазобедрена става -> Коляно -> Изпънат крак напред)
         addSmoothLimb(bx + 0.20f, by + 0.90f, bz, bx + 0.20f, by + 0.95f, bz - 0.70f, 0.14f, 0.20f, 0.20f, 0.22f);
-        addSmoothLimb(bx + 0.20f, by + 0.95f, bz - 0.70f, bx + 0.20f, by + 1.05f, bz - 1.45f, 0.13f, 0.92f, 0.78f, 0.65f); // Изпънато стъпало
+        addSmoothLimb(bx + 0.20f, by + 0.95f, bz - 0.70f, bx + 0.20f, by + 1.05f, bz - 1.45f, 0.13f, 0.92f, 0.78f, 0.65f);
     } else {
         addSmoothLimb(bx + 0.20f, by + 0.90f, bz, bx + 0.20f, by + 0.08f, bz, 0.14f, 0.20f, 0.20f, 0.22f);
     }
 
-    // Лява ръка в бойна стойка
+    // Ръце
     addSmoothLimb(bx - 0.38f, by + 1.48f, bz, bx - 0.38f, by + 1.15f, bz - 0.35f, 0.11f, r, g, b);
-
-    // Дясна ръка: При ЮМРУК замахва директно напред!
     if (isPunching) {
         addSmoothLimb(bx + 0.38f, by + 1.48f, bz, bx + 0.38f, by + 1.42f, bz - 1.15f, 0.12f, r, g, b);
-        addSmoothSphere(bx + 0.38f, by + 1.42f, bz - 1.25f, 0.12f, 0.92f, 0.78f, 0.65f); // Юмрук
+        addSmoothSphere(bx + 0.38f, by + 1.42f, bz - 1.25f, 0.12f, 0.92f, 0.78f, 0.65f);
     } else {
         addSmoothLimb(bx + 0.38f, by + 1.48f, bz, bx + 0.38f, by + 1.15f, bz - 0.35f, 0.11f, r, g, b);
     }
+}
+
+// СТРОЕНЕ НА ШАОЛИНСКИЯ ХРАМ (Храмова порта, огнени факли и каменен бордюр)
+static void buildShaolinTempleStage() {
+    // 1. Четири огнени жертвеника по ъглите с горящ пламък
+    float torchPos[4][2] = { {-7.0f, -7.0f}, {7.0f, -7.0f}, {-7.0f, 6.0f}, {7.0f, 6.0f} };
+    for (int i = 0; i < 4; i++) {
+        float tx = torchPos[i][0], tz = torchPos[i][1];
+        // Каменен постамент
+        addSmoothLimb(tx, 0.0f, tz, tx, 2.2f, tz, 0.32f, 0.38f, 0.35f, 0.40f);
+        // Каменна чаша за огън
+        addSmoothSphere(tx, 2.3f, tz, 0.48f, 0.25f, 0.22f, 0.26f);
+        // Светещ огнен пламък
+        addSmoothSphere(tx, 2.7f, tz, 0.30f, 1.0f, 0.45f, 0.05f);
+    }
+
+    // 2. Шаолинска храмова порта на заден план (Pagoda Gate при Z = -10.0)
+    // Червени носещи колони
+    addSmoothLimb(-4.2f, 0.0f, -10.0f, -4.2f, 4.5f, -10.0f, 0.35f, 0.78f, 0.15f, 0.15f);
+    addSmoothLimb( 4.2f, 0.0f, -10.0f,  4.2f, 4.5f, -10.0f, 0.35f, 0.78f, 0.15f, 0.15f);
+    // Напречна греда
+    addSmoothLimb(-5.2f, 4.1f, -10.0f, 5.2f, 4.1f, -10.0f, 0.28f, 0.85f, 0.20f, 0.15f);
+    // Извит покрив на пагода (широк надвес)
+    addSmoothLimb(-6.0f, 4.8f, -10.0f, 6.0f, 4.8f, -10.0f, 0.42f, 0.22f, 0.20f, 0.25f);
+    addSmoothLimb(-3.5f, 5.3f, -10.0f, 3.5f, 5.3f, -10.0f, 0.30f, 0.18f, 0.16f, 0.20f);
+
+    // 3. Каменен бордюр около бойната зона (Ring Border)
+    addSmoothLimb(-8.0f, 0.15f, -8.0f,  8.0f, 0.15f, -8.0f, 0.18f, 0.45f, 0.42f, 0.48f);
+    addSmoothLimb(-8.0f, 0.15f,  7.0f,  8.0f, 0.15f,  7.0f, 0.18f, 0.45f, 0.42f, 0.48f);
+    addSmoothLimb(-8.0f, 0.15f, -8.0f, -8.0f, 0.15f,  7.0f, 0.18f, 0.45f, 0.42f, 0.48f);
+    addSmoothLimb( 8.0f, 0.15f, -8.0f,  8.0f, 0.15f,  7.0f, 0.18f, 0.45f, 0.42f, 0.48f);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -234,8 +255,8 @@ Java_com_aigame_engine_NativeEngine_onSurfaceCreated(JNIEnv*, jobject) {
         gridVerts[idx++]= 10.0f;   gridVerts[idx++]=0.01f; gridVerts[idx++]=(float)i;
     }
 
-    playerX = 0.0f; playerY = 0.0f; playerZ = 2.0f; playerVY = 0.0f; isGrounded = true; playerHp = 100;
-    enemyX = 0.0f; enemyY = 0.0f; enemyZ = -3.5f; enemyHp = 80; enemyActive = true;
+    playerX = 0.0f; playerY = 0.0f; playerZ = 1.5f; playerVY = 0.0f; isGrounded = true; playerHp = 100;
+    enemyX = 0.0f; enemyY = 0.0f; enemyZ = -3.2f; enemyHp = 80; enemyActive = true;
     gameScore = 0; gameWon = false;
 }
 
@@ -251,14 +272,12 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     if (kickTimer > 0.0f) kickTimer -= 0.05f;
     if (enemyHitTimer > 0.0f) enemyHitTimer -= 0.05f;
 
-    // Гравитация и скок
     if (!isGrounded) {
         playerY += playerVY;
         playerVY -= 0.022f;
         if (playerY <= 0.0f) { playerY = 0.0f; playerVY = 0.0f; isGrounded = true; }
     }
 
-    // Врагът преследва
     if (enemyActive) {
         float dx = playerX - enemyX, dz = playerZ - enemyZ;
         float dist = sqrtf(dx*dx + dz*dz);
@@ -270,13 +289,13 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
             if (++atkCd > 35) {
                 atkCd = 0;
                 playerHp -= 10;
-                if (playerHp <= 0) { playerHp = playerMaxHp; playerX = 0; playerZ = 2.0f; }
+                if (playerHp <= 0) { playerHp = playerMaxHp; playerX = 0; playerZ = 1.5f; }
             }
         }
     }
 
     camX = playerX;
-    camY = playerY + 5.5f;
+    camY = playerY + 5.2f;
     camZ = playerZ + 9.5f;
 
     glClearColor(bgR, bgG, bgB, 1.0f);
@@ -296,24 +315,19 @@ Java_com_aigame_engine_NativeEngine_onDrawFrame(JNIEnv*, jobject) {
     glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, VP);
     glUniform3f(eyePosLoc, camX, camY, camZ);
 
-    // ГЕНЕРИРАНЕ НА ГЛАДКИЯ СВЯТ (БЕЗ КУБОВЕ)
     meshBuffer.clear();
 
-    // 1. Четири каменни колони на арената
-    addSmoothLimb(-8.0f, 0.0f, -8.0f, -8.0f, 4.0f, -8.0f, 0.45f, 0.45f, 0.42f, 0.48f);
-    addSmoothLimb( 8.0f, 0.0f, -8.0f,  8.0f, 4.0f, -8.0f, 0.45f, 0.45f, 0.42f, 0.48f);
-    addSmoothLimb(-8.0f, 0.0f,  8.0f, -8.0f, 4.0f,  8.0f, 0.45f, 0.45f, 0.42f, 0.48f);
-    addSmoothLimb( 8.0f, 0.0f,  8.0f,  8.0f, 4.0f,  8.0f, 0.45f, 0.45f, 0.42f, 0.48f);
+    // 1. Истински Шаолински храм с пагода порта, каменни бордюри и горящи огньове
+    buildShaolinTempleStage();
 
-    // 2. Шаолин боец (Играч - Жълто кимоно)
+    // 2. Шаолин боец (Играч)
     drawOrganicFighter(playerX, playerY, playerZ, 0.95f, 0.78f, 0.12f, punchTimer > 0.0f, kickTimer > 0.0f, false);
 
-    // 3. Враг Нинджа (Тъмно лилаво)
+    // 3. Враг Нинджа
     if (enemyActive) {
         drawOrganicFighter(enemyX, enemyY, enemyZ, 0.55f, 0.15f, 0.75f, false, false, enemyHitTimer > 0.0f);
     }
 
-    // Рендиране на всички полигони наведнъж
     if (!meshBuffer.empty()) {
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), &meshBuffer[0].x);
@@ -349,7 +363,7 @@ Java_com_aigame_engine_NativeEngine_triggerAction(JNIEnv*, jobject, jint actionT
         if (enemyActive && dist < 2.8f) {
             enemyHp -= 45;
             enemyHitTimer = 0.45f;
-            enemyZ -= 2.2f; // Мощен ритник назад!
+            enemyZ -= 2.2f;
             if (enemyHp <= 0) { enemyActive = false; gameScore += 100; gameWon = true; }
         }
     } else if (actionType == 3) { // СКОК
@@ -368,8 +382,8 @@ Java_com_aigame_engine_NativeEngine_movePlayer(JNIEnv*, jobject, jfloat f, jfloa
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aigame_engine_NativeEngine_restartGame(JNIEnv*, jobject) {
-    playerX = 0.0f; playerY = 0.0f; playerZ = 2.0f; playerVY = 0.0f; isGrounded = true; playerHp = 100;
-    enemyX = 0.0f; enemyY = 0.0f; enemyZ = -3.5f; enemyHp = 80; enemyActive = true;
+    playerX = 0.0f; playerY = 0.0f; playerZ = 1.5f; playerVY = 0.0f; isGrounded = true; playerHp = 100;
+    enemyX = 0.0f; enemyY = 0.0f; enemyZ = -3.2f; enemyHp = 80; enemyActive = true;
     gameScore = 0; gameWon = false;
 }
 
