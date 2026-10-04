@@ -5,31 +5,46 @@ import android.app.Dialog
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
-import android.view.View
+import android.view.Choreographer
+import android.view.SurfaceView
 import android.view.ViewGroup
 import android.widget.*
-import android.opengl.GLSurfaceView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import kotlinx.coroutines.delay
+import com.google.android.filament.EntityManager
+import com.google.android.filament.LightManager
+import com.google.android.filament.Skybox
+import com.google.android.filament.utils.ModelViewer
+import com.google.android.filament.utils.Utils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var glSurfaceView: GLSurfaceView
-    private lateinit var tvHp: TextView
-    private lateinit var tvScore: TextView
-    private lateinit var tvWinBanner: TextView
-    private lateinit var joystickView: JoystickView
+    private lateinit var surfaceView: SurfaceView
+    private lateinit var modelViewer: ModelViewer
     private lateinit var prefs: SharedPreferences
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var adapter: ChatAdapter
 
-    private var forwardInput = 0f
-    private var strafeInput = 0f
+    private val choreographer = Choreographer.getInstance()
+    private val frameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            choreographer.postFrameCallback(this)
+            modelViewer.render(frameTimeNanos)
+        }
+    }
+
+    companion object {
+        init {
+            Utils.init()
+        }
+    }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,44 +53,22 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("GMS_PREFS", Context.MODE_PRIVATE)
 
-        glSurfaceView = findViewById(R.id.gl_surface_view)
-        glSurfaceView.setEGLContextClientVersion(3)
-        glSurfaceView.setRenderer(EngineRenderer())
+        surfaceView = findViewById(R.id.filament_surface_view)
+        modelViewer = ModelViewer(surfaceView)
 
-        tvHp = findViewById(R.id.tv_hp)
-        tvScore = findViewById(R.id.tv_score)
-        tvWinBanner = findViewById(R.id.tv_win_banner)
-        joystickView = findViewById(R.id.joystick_view)
+        // Добавяне на реалистично PBR слънце със сенки
+        setupPbrLighting()
 
-        joystickView.onJoystickMove = { f, s ->
-            forwardInput = f
-            strafeInput = s
+        // Плавно завъртане и зуум с жестове
+        surfaceView.setOnTouchListener { _, event ->
+            modelViewer.onTouchEvent(event)
+            true
         }
 
-        // 1=ЮМРУК, 2=РИТНИК, 3=СКОК
-        findViewById<Button>(R.id.btn_punch).setOnClickListener { NativeEngine.triggerAction(1) }
-        findViewById<Button>(R.id.btn_kick).setOnClickListener { NativeEngine.triggerAction(2) }
-        findViewById<Button>(R.id.btn_jump).setOnClickListener { NativeEngine.triggerAction(3) }
+        // Зареждане на фотореалистичния 3D модел от assets
+        loadGlbModel("models/model.glb")
 
-        // 60 FPS геймплей лууп
-        lifecycleScope.launch {
-            while (true) {
-                if (forwardInput != 0f || strafeInput != 0f) {
-                    NativeEngine.movePlayer(forwardInput, strafeInput)
-                }
-                tvHp.text = "❤️ ${NativeEngine.getPlayerHp()} HP"
-                tvScore.text = "💎 ${NativeEngine.getScore()}"
-
-                if (NativeEngine.isWon()) {
-                    tvWinBanner.visibility = View.VISIBLE
-                } else {
-                    tvWinBanner.visibility = View.GONE
-                }
-                delay(16)
-            }
-        }
-
-        // Чат конзола
+        // Настройка на чата
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -85,7 +78,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("Бойната арена е готова! Ползвай джойстика, УДАР, РИТНИК и СКОК.", false)
+        addMessage("Google Filament PBR Engine е зареден. Виж отраженията и качеството на 3D модела горе!", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
@@ -95,17 +88,6 @@ class MainActivity : AppCompatActivity() {
 
             addMessage(text, true)
             chatInput.text.clear()
-
-            // Светкавичен рестарт при написване на "рестарт"
-            val lower = text.lowercase().trim()
-            if (lower == "рестарт" || lower == "рестартирай" || lower == "пак" || lower == "отново") {
-                NativeEngine.restartGame()
-                tvWinBanner.visibility = View.GONE
-                tvHp.text = "❤️ 100 HP"
-                tvScore.text = "💎 0"
-                addMessage("Битката е рестартирана мигновено!", false)
-                return@setOnClickListener
-            }
 
             val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
             val key = prefs.getString("ai_api_key", "") ?: ""
@@ -124,6 +106,44 @@ class MainActivity : AppCompatActivity() {
                 messages[loadingIndex] = ChatMessage(reply, false)
                 adapter.notifyItemChanged(loadingIndex)
                 chatRecycler.scrollToPosition(loadingIndex)
+            }
+        }
+    }
+
+    private fun setupPbrLighting() {
+        // Тъмно студийно небе
+        modelViewer.scene.skybox = Skybox.Builder()
+            .color(0.12f, 0.14f, 0.18f, 1.0f)
+            .build(modelViewer.engine)
+
+        // Истинско PBR слънце със сенки
+        val sunlight = EntityManager.get().create()
+        LightManager.Builder(LightManager.Type.SUN)
+            .color(1.0f, 0.98f, 0.95f)
+            .intensity(120_000.0f)
+            .direction(0.4f, -1.0f, -0.6f)
+            .castShadows(true)
+            .build(modelViewer.engine, sunlight)
+
+        modelViewer.scene.addEntity(sunlight)
+    }
+
+    private fun loadGlbModel(assetPath: String) {
+        lifecycleScope.launch {
+            val buffer = withContext(Dispatchers.IO) {
+                try {
+                    assets.open(assetPath).use { input ->
+                        val bytes = input.readBytes()
+                        ByteBuffer.wrap(bytes)
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            buffer?.let {
+                modelViewer.loadModelGlb(it)
+                modelViewer.transformToUnitCube()
             }
         }
     }
@@ -173,8 +193,8 @@ class MainActivity : AppCompatActivity() {
                     currentModels.clear()
                     currentModels.addAll(models)
                     spinnerModels.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, currentModels)
-                    tvModelLabel.visibility = View.VISIBLE
-                    spinnerModels.visibility = View.VISIBLE
+                    tvModelLabel.visibility = android.view.View.VISIBLE
+                    spinnerModels.visibility = android.view.View.VISIBLE
                     tvStatus.text = "Намерени ${models.size} модела."
                     tvStatus.setTextColor(0xFF00FF00.toInt())
                 } else {
@@ -187,7 +207,7 @@ class MainActivity : AppCompatActivity() {
         btnTest.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else ""
+            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else ""
             if (key.isEmpty() || model.isEmpty()) {
                 tvStatus.text = "Избери модел!"
                 tvStatus.setTextColor(0xFFFF0000.toInt())
@@ -205,7 +225,7 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else "Не е избран"
+            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else "Не е избран"
             prefs.edit().putString("ai_provider", provider).putString("ai_api_key", key).putString("ai_model", model).apply()
             addMessage("AI запазен: $provider ($model)", false)
             dialog.dismiss()
@@ -214,6 +234,18 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    override fun onResume() { super.onResume(); glSurfaceView.onResume() }
-    override fun onPause() { super.onPause(); glSurfaceView.onPause() }
+    override fun onResume() {
+        super.onResume()
+        choreographer.postFrameCallback(frameCallback)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        choreographer.removeFrameCallback(frameCallback)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        choreographer.removeFrameCallback(frameCallback)
+    }
 }
