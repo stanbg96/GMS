@@ -56,19 +56,16 @@ class MainActivity : AppCompatActivity() {
         surfaceView = findViewById(R.id.filament_surface_view)
         modelViewer = ModelViewer(surfaceView)
 
-        // Добавяне на реалистично PBR слънце със сенки
         setupPbrLighting()
 
-        // Плавно завъртане и зуум с жестове
         surfaceView.setOnTouchListener { _, event ->
             modelViewer.onTouchEvent(event)
             true
         }
 
-        // Зареждане на фотореалистичния 3D модел от assets
+        // Зареждане на началния PBR модел
         loadGlbModel("models/model.glb")
 
-        // Настройка на чата
         val chatRecycler: RecyclerView = findViewById(R.id.chat_recycler)
         val chatInput: EditText = findViewById(R.id.chat_input)
         val btnSend: Button = findViewById(R.id.btn_send)
@@ -78,7 +75,7 @@ class MainActivity : AppCompatActivity() {
         chatRecycler.layoutManager = LinearLayoutManager(this)
         chatRecycler.adapter = adapter
 
-        addMessage("Google Filament PBR Engine е зареден. Виж отраженията и качеството на 3D модела горе!", false)
+        addMessage("Filament PBR активен! Напиши 'кола' или 'шлем', за да заредиш истински 3D модел.", false)
 
         btnAiCloud.setOnClickListener { showAiCloudDialog() }
 
@@ -88,6 +85,17 @@ class MainActivity : AppCompatActivity() {
 
             addMessage(text, true)
             chatInput.text.clear()
+
+            val lower = text.lowercase()
+            if (lower.contains("кола") || lower.contains("автомобил") || lower.contains("truck") || lower.contains("car")) {
+                loadGlbModel("models/car.glb")
+                addMessage("Зареждам истински PBR автомобил с физично осветление...", false)
+                return@setOnClickListener
+            } else if (lower.contains("шлем") || lower.contains("helmet") || lower.contains("робот")) {
+                loadGlbModel("models/model.glb")
+                addMessage("Зареждам фотореалистичния шлем...", false)
+                return@setOnClickListener
+            }
 
             val provider = prefs.getString("ai_provider", "OpenRouter") ?: "OpenRouter"
             val key = prefs.getString("ai_api_key", "") ?: ""
@@ -111,12 +119,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupPbrLighting() {
-        // Тъмно студийно небе
         modelViewer.scene.skybox = Skybox.Builder()
             .color(0.12f, 0.14f, 0.18f, 1.0f)
             .build(modelViewer.engine)
 
-        // Истинско PBR слънце със сенки
         val sunlight = EntityManager.get().create()
         LightManager.Builder(LightManager.Type.SUN)
             .color(1.0f, 0.98f, 0.95f)
@@ -193,8 +199,8 @@ class MainActivity : AppCompatActivity() {
                     currentModels.clear()
                     currentModels.addAll(models)
                     spinnerModels.adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, currentModels)
-                    tvModelLabel.visibility = android.view.View.VISIBLE
-                    spinnerModels.visibility = android.view.View.VISIBLE
+                    tvModelLabel.visibility = View.VISIBLE
+                    spinnerModels.visibility = View.VISIBLE
                     tvStatus.text = "Намерени ${models.size} модела."
                     tvStatus.setTextColor(0xFF00FF00.toInt())
                 } else {
@@ -207,7 +213,7 @@ class MainActivity : AppCompatActivity() {
         btnTest.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else ""
+            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else ""
             if (key.isEmpty() || model.isEmpty()) {
                 tvStatus.text = "Избери модел!"
                 tvStatus.setTextColor(0xFFFF0000.toInt())
@@ -225,7 +231,7 @@ class MainActivity : AppCompatActivity() {
         btnSave.setOnClickListener {
             val provider = spinnerProvider.selectedItem.toString()
             val key = etApiKey.text.toString().trim()
-            val model = if (spinnerModels.visibility == android.view.View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else "Не е избран"
+            val model = if (spinnerModels.visibility == View.VISIBLE && spinnerModels.selectedItem != null) spinnerModels.selectedItem.toString() else "Не е избран"
             prefs.edit().putString("ai_provider", provider).putString("ai_api_key", key).putString("ai_model", model).apply()
             addMessage("AI запазен: $provider ($model)", false)
             dialog.dismiss()
